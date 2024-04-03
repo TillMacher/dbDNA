@@ -1,10 +1,13 @@
 # dbDNA - A phylogeny- and expert identifier-driven grading system for reliable taxonomic annotation of (meta)barcoding data
 
-<img src="https://github.com/TillMacher/apscale_gui/blob/master/_data/apscale_start.png" width="40%" height="40%">
-
 ## Introduction
 
 Text
+
+<p align="center">
+  <img width="100%" height="100%" src="https://github.com/TillMacher/dbDNA/blob/main/source/dbDNA_aims.png">
+</p>
+
 
 ## Installation
 ### SeqRanker
@@ -29,6 +32,9 @@ mPTP is a software that is applied for species delimitation using the multi-rate
 
 ### BLAST+
 BLAST+ is a software to create BLAST databases and perform BLAST searches on custom (local) databases. More information about the installation of BLAST+ can be found [here](https://blast.ncbi.nlm.nih.gov/doc/blast-help/downloadblastdata.html#downloadblastdata).
+
+### APSCALE blast
+APSCALE is a software to process (e)DNA metabarcoding datasets. The blastn module is used to perform BLAST searches on custom (local) databases. More information about the installation of APSCALE blast can be found [here](https://github.com/TillMacher/apscale_gui).
 
 ## Settings file
 
@@ -66,10 +72,27 @@ Sheet 2 contains the database information and source files. **Here, the "User in
 | MIDORI2 fasta         |                          | Enter path to MDORI2 file                  | PATH        |
 | outgroup_fasta        | **/PATH/outgroup.fasta**    | Enter path to outgroup sequence             | PATH        |
 
+## Example data
+Example data that was used for the creation a database for European freshwater invertebrates can be found [here](https://github.com/TillMacher/dbDNA/tree/main/european_freshwater_invertebrates):
+* [Taxa list](https://github.com/TillMacher/dbDNA/blob/main/european_freshwater_invertebrates/Freshwaterecology_info_all_invertebrates.xlsx)
+* [Country white list](https://github.com/TillMacher/dbDNA/blob/main/european_freshwater_invertebrates/country_white_list.xlsx)
+* [Identifier white list](https://github.com/TillMacher/dbDNA/blob/main/european_freshwater_invertebrates/identifier_white_list.xlsx)
+* [Settings file](https://github.com/TillMacher/dbDNA/blob/main/european_freshwater_invertebrates/settings.xlsx)
 
-## Documentation
+## SeqRanker pipeline
 
-Text
+### Step 1: Data acquisition
+* a,b,c
+
+### Step 2: Species delineation
+* a,b,c
+
+### Step 3: Rating system
+* a,b,c
+
+### Step4: Database creation
+* a,b,c
+
 
 ## Available databases
 

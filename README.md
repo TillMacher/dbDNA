@@ -117,8 +117,8 @@ Example data that was used for the creation a database for European freshwater i
 | monophyletic (singleton) | 5               | Delimited species group only contains one species, but only a single sequence |
 | good sequence quality | 3                 | Only the four bases "AGCT" are present         |
 | bad sequence quality  | -10               | More than 2% of the sequence are not "AGCT"    |
-| longer than 500 bp    | 2                 | Barcodes have a recommended length of over 500 bp |
-| identifier on whitelist OR | 15           | The specimen was identified by an identifier on the white list |
+| longer than 500 bp    | 2                 | The recommended minimum barcode length is >= 500 bp |
+| identifier on whitelist | 15           | The specimen was identified by an identifier on the white list |
 | main country OR       | 5                 | The specimen was collected in the main country |
 | neighbour country OR  | 4                 | The specimen was collected in a neighbouring country |
 | continent             | 3                 | The specimen was collected on the same continent |

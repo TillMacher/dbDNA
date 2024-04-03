@@ -24,12 +24,45 @@ IQ-TREE is a phylogenomic software that calculate maximum likelihood trees. IQ-T
 ### mPTP
 mPTP is a software that is applied for species delimitation using the multi-rate Poisson Tree Processes. More information about the installation of mPTP can be found [here](https://github.com/Pas-Kapli/mptp)
 
-### blastn
-[here](https://blast.ncbi.nlm.nih.gov/doc/blast-help/downloadblastdata.html#downloadblastdata)
+### BLAST+
+BLAST+ is a software to create BLAST databases and perform BLAST searches on custom (local) databases. More information about the installation of BLAST+ can be found [here](https://blast.ncbi.nlm.nih.gov/doc/blast-help/downloadblastdata.html#downloadblastdata).
 
-## Usage example
+## Settings file
 
-Text
+The SeqRanker pipeline collects the required information from a .xlsx file. All specifications must be entered into this file.
+
+Sheet 1 contains the Run parameters. **Here, the "Run" column is to be modified**
+
+| **Task**          | **Run** | **Comment**                       |
+|:------------------|:-------:|:----------------------------------|
+| source            | **BOLD**    | define source                     |
+| download          | **yes**      | download BOLD/NCBI data          |
+| extract           | **yes**      | extract BOLD/NCBI data           |
+| phylogeny         | **yes**     | calculate phylogenetic trees      |
+| rating            | **yes**     | create table and rate records     |
+| create database   | **yes**     | create blast database             |
+
+Sheet 2 contains the database information and source files. **Here, the "User input" column is to be modified**
+
+| **Variable**          | **User input**          | **Comment**                               | **Options** |
+|:----------------------|:------------------------|:------------------------------------------|:------------|
+| project name          | **Invertebrate_example_database** | Name of the database                  | string      |
+| taxa list             | **/PATH/invertebrates.xlsx** | Excel file containing taxa to download    | PATH        |
+| identifier whitelist  | **/PATH/identifier_white_list.xlsx** | Enter path to identifier whitelist | PATH        |
+| location whitelist    | **/PATH/country_white_list.xlsx** | Enter path to location whitelist   | PATH        |
+| output folder         | **/PATH/example**           | Enter path to output directory             | PATH        |
+| marker                | **COI-5P**                   | Marker to download                         | string      |
+| rating minimum        | **5**                       | Keep only sequences that are >= X          | yes / no    |
+| download overwrite    | **yes**                     | Overwrite existing files?                  | yes / no    |
+| alignment overwrite   | **yes**                     | Overwrite existing files?                  | yes / no    |
+| tree overwrite        | **yes**                     | Overwrite existing files?                  | yes / no    |
+| mafft executable      | **/PATH/mafft**             | Either "mafft" or "PATH/TO/mafft"           | PATH        |
+| iqtree executable     | **/PATH/iqtree2**           | Either "iqtree" or "PATH/TO/iqtree"         | PATH        |
+| mptp executable       | **/PATH/mptp**              | Either "mptp" or "PATH/TO/mptp"             | PATH        |
+| makeblastdb executable | **/PATH/makeblastdb**      | Either "makeblastdb" or "PATH/TO/makeblastdb" | PATH        |
+| MIDORI2 fasta         |                          | Enter path to MDORI2 file                  | PATH        |
+| outgroup_fasta        | **/PATH/outgroup.fasta**    | Enter path to outgroup sequence             | PATH        |
+
 
 ## Documentation
 

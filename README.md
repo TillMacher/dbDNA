@@ -85,7 +85,7 @@ Example data that was used for the creation a database for European freshwater i
 * A more detailed overview into the pipeline can be found in [this](https://github.com/TillMacher/dbDNA/blob/main/source/dbDNA_overview.pdf) presentation.
 
 ### Step 1: Data acquisition
-* Records for all taxa provided in taxa list can be downloaded (the taxon can be any taxonomic level).
+* Records for all taxa provided in taxa list are downloaded (the taxon can be any taxonomic level). For example, of a genus is provided, all species records for this genus will be fetched.
 * Sequence records can be obtained from **BOLDsystems** and **MIDORI2** (GenBank).
 * For each record, all available metadata is downloaded (from BOLDsystems or GenBank, depending on the source).
 * All records and their respective metadata are stored in a raw sequence table.
@@ -93,12 +93,41 @@ Example data that was used for the creation a database for European freshwater i
 ### Step 2: Species delineation
 * The sequences of all records of each family in the dataset are combined in a separate .fasta file.
 * A multiple sequence alignment for each family is calculated, using mafft.
-* A maximum likelihood is calculated, using IQ-Tree (fast option).
-* Species are delmited, using mPTP.
-
+* A maximum likelihood tree for each family is calculated, using IQ-Tree (fast option).
+* Species are delmited for each family, using mPTP.
+* The species delimitation results are used evaluate if a species record is mono- or paraphyletic.
 
 ### Step 3: Rating system
-* a,b,c
+* Each individual record is scored, based on the following criteria.
+* If a criterion is not met, no points are gained.
+
+| **Category**          | **Points gained** | **Explanation**                               |
+|:----------------------|:------------------:|:----------------------------------------------|
+| monophyletic OR       | 15                | Delimited species group only contains one species |
+| monophyletic (singleton) | 5               | Delimited species group only contains one species, but only a single sequence |
+| good sequence quality | 3                 | Only the four bases "AGCT" are present         |
+| bad sequence quality  | -10               | More than 2% of the sequence are not "AGCT"    |
+| longer than 500 bp    | 2                 | Barcodes have a recommended length of over 500 bp |
+| identifier on whitelist OR | 15           | The specimen was identified by an identifier on the white list |
+| main country OR       | 5                 | The specimen was collected in the main country |
+| neighbour country OR  | 4                 | The specimen was collected in a neighbouring country |
+| continent             | 3                 | The specimen was collected on the same continent |
+| image                 | 5                 | An image is available                         |
+| province              | 1                 | Metadata available                            |
+| region                | 1                 | Metadata available                            |
+| exactsite             | 1                 | Metadata available                            |
+| lifestage             | 1                 | Metadata available                            |
+| sex                   | 1                 | Metadata available                            |
+
+* Each record can gain between 50 (excellent) and -10 (highly unreliable) points.
+* All records are categorized according to their points.
+
+| **Range** | **Gold** | **Silver** | **Bronze** | **Unreliable** |
+| --- | --- | --- | --- | --- |
+| Upper | 50 | 39 | 24 | 9 |
+| Lower | 40 | 25 | 10 | -10 |
+
+
 
 ### Step4: Database creation
 * a,b,c

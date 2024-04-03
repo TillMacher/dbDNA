@@ -5,7 +5,7 @@
 Text
 
 ## Installation
-#### SeqRanker
+#### SeqRanker pipeline
 Individual dbDNA databases can be created using the SeqRanker pipeline, which can be installed on all common operating systems (Windows, Linux, MacOS). SeqRanker requires Python 3.7 or higher and can be easily installed via pip in any command line:
 
 `pip3 install seqranker`
@@ -13,6 +13,10 @@ Individual dbDNA databases can be created using the SeqRanker pipeline, which ca
 To update SeqRanker run:
 
 `pip3 install --upgrade seqranker`
+
+Alternatively, a standalone version for Windows11 and MacOS (tested on Ventura 13.5) is available under the latest release.
+
+#### Further Dependencies
 
 Besides the main script, several other programs are required for the database creation. Please follow the installation instructions for your operating system for each software.
 

@@ -37,7 +37,7 @@ APSCALE is a software to process (e)DNA metabarcoding datasets. The blastn modul
 
 ## Settings file
 
-The SeqRanker pipeline collects the required information from a .xlsx file. All specifications must be entered into this file.
+The SeqRanker pipeline collects the required information from an [Excel file](https://github.com/TillMacher/dbDNA/blob/main/european_freshwater_invertebrates/settings.xlsx). All specifications must be entered into this file.
 
 Sheet 1 contains the Run parameters. **Here, the "Run" column is to be modified**
 
@@ -70,6 +70,17 @@ Sheet 2 contains the database information and source files. **Here, the "User in
 | makeblastdb executable | **/PATH/makeblastdb**      | Either "makeblastdb" or "PATH/TO/makeblastdb" | PATH        |
 | MIDORI2 fasta         |                          | Enter path to MDORI2 file                  | PATH        |
 | outgroup_fasta        | **/PATH/outgroup.fasta**    | Enter path to outgroup sequence             | PATH        |
+
+## Run SeqRanker
+First, prepare the settings file according to your needs. Then, the SeqRanker pipeline can easily be initiated via the following command(s):
+
+#### pypi version
+* Open a new terminal
+* Execute: `seqranker ./PATH/TO/FOLDER/settings.xlsx`
+
+#### standalone version
+* Doubleclick on the `seqranker_v0.1-macosx-ventura` or `seqranker_v0.1-W11` executable.
+* Provide the settings.xlsx file.
 
 ## Example data
 Example data that was used for the creation a database for European freshwater invertebrates can be found [here](https://github.com/TillMacher/dbDNA/tree/main/european_freshwater_invertebrates):
@@ -125,8 +136,6 @@ Example data that was used for the creation a database for European freshwater i
 | --- | --- | --- | --- | --- |
 | Upper | 50 | 39 | 24 | 9 |
 | Lower | 40 | 25 | 10 | -10 |
-
-
 
 #### Step 4: Database creation
 * The function makeblastdb is used to create a BLAST+ compatible database.

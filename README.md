@@ -1,5 +1,4 @@
-# dbDNA
-### dbDNA - A phylogeny- and expert identifier-driven grading system for reliable taxonomic annotation of (meta)barcoding data
+# dbDNA - A phylogeny- and expert identifier-driven grading system for reliable taxonomic annotation of (meta)barcoding data
 
 ## Introduction
 

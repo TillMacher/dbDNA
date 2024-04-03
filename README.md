@@ -14,6 +14,8 @@ To update SeqRanker run:
 
 `pip3 install --upgrade seqranker`
 
+Besides the main script, several other programs are required for the database creation. Please follow the installation instructions for your operating system for each software.
+
 ### mafft
 Mafft is software to calculate multiple sequence alignments and is required the phylogenetic approach. More information about the installation of mafft can be found [here](https://mafft.cbrc.jp/alignment/software/).
 

@@ -153,11 +153,11 @@ Example data that was used for the creation a database for European freshwater i
 
 ## Available databases
 #### European freshwater invertebrates (COI)
-* All species of all genera, classified as European freshwater invertebrates (according to [freshwaterecology.info](https://www.freshwaterecology.info/index.php)).
-* A filtered and unfilitered version is available.
+* All species of all genera classified as European freshwater invertebrates (according to [freshwaterecology.info](https://www.freshwaterecology.info/index.php)).
+* A filtered and unfilitered version is available [here](https://www.freshwaterecology.info/index.php).
 #### European freshwater fish and lamprey (12S)
-* All species of all genera, classified as European freshwater fish and lamprey (according to [freshwaterecology.info](https://www.freshwaterecology.info/index.php)).
-* A filtered and unfilitered version is available.
+* All species of all genera classified as European freshwater fish and lamprey (according to [freshwaterecology.info](https://www.freshwaterecology.info/index.php)).
+* A filtered and unfilitered version is available [here](https://www.freshwaterecology.info/index.php).
 
 ## Citation
 

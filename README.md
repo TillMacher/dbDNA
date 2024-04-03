@@ -132,7 +132,7 @@ Example data that was used for the creation a database for European freshwater i
 * Each record can gain between 50 (excellent) and -10 (highly unreliable) points.
 * All records are categorized according to their points.
 
-| **Range** | **Gold** | **Silver** | **Bronze** | **Unreliable** |
+| **Border** | **Gold** | **Silver** | **Bronze** | **Unreliable** |
 | --- | --- | --- | --- | --- |
 | Upper | 50 | 39 | 24 | 9 |
 | Lower | 40 | 25 | 10 | -10 |

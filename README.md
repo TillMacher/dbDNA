@@ -79,13 +79,23 @@ Example data that was used for the creation a database for European freshwater i
 * [Identifier white list](https://github.com/TillMacher/dbDNA/blob/main/european_freshwater_invertebrates/identifier_white_list.xlsx)
 * [Settings file](https://github.com/TillMacher/dbDNA/blob/main/european_freshwater_invertebrates/settings.xlsx)
 
-## SeqRanker pipeline
+## SeqRanker pipeline: a short overview
+
+### Overview slides
+* A more detailed overview into the pipeline can be found in [this](https://github.com/TillMacher/dbDNA/blob/main/source/dbDNA_overview.pdf) presentation.
 
 ### Step 1: Data acquisition
-* a,b,c
+* Records for all taxa provided in taxa list can be downloaded (the taxon can be any taxonomic level).
+* Sequence records can be obtained from **BOLDsystems** and **MIDORI2** (GenBank).
+* For each record, all available metadata is downloaded (from BOLDsystems or GenBank, depending on the source).
+* All records and their respective metadata are stored in a raw sequence table.
 
 ### Step 2: Species delineation
-* a,b,c
+* The sequences of all records of each family in the dataset are combined in a separate .fasta file.
+* A multiple sequence alignment for each family is calculated, using mafft.
+* A maximum likelihood is calculated, using IQ-Tree (fast option).
+* Species are delmited, using mPTP.
+
 
 ### Step 3: Rating system
 * a,b,c

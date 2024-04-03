@@ -14,7 +14,7 @@ To update SeqRanker run:
 
 `pip3 install --upgrade seqranker`
 
-Alternatively, a standalone version for Windows11 and MacOS (tested on Ventura 13.5) is available under the latest release.
+Alternatively, a standalone version for Windows11 and MacOS (tested on Ventura 13.5) is available under the [latest release](https://github.com/TillMacher/dbDNA/releases).
 
 #### Further Dependencies
 

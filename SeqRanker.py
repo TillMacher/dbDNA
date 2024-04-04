@@ -20,7 +20,12 @@ from requests.packages.urllib3.util.retry import Retry
 from requests.adapters import HTTPAdapter
 from ete3 import NCBITaxa
 from ete3 import Tree
+import threading
 import xmltodict, pickle
+
+print_lock = threading.Lock()
+
+####### NEW PROJECT #######
 
 def create_new_project(project_name, output_folder):
 
@@ -46,6 +51,26 @@ def create_new_project(project_name, output_folder):
         os.makedirs(dir_3)
 
     return [output_directory, dir_1, dir_2, dir_3]
+
+####### EXTRACT #######
+
+## function to split the raw barcode table into families
+def split_raw_barcode_table(output_directories, df_filtered):
+
+    families = sorted(df_filtered['family_name'].drop_duplicates().values.tolist())
+
+    ## create a single file for each family
+    for family in families:
+        # Sub directories for output and temporary files
+        family_dir = Path('{}/{}'.format(output_directories[2], family))
+        if not os.path.exists(family_dir):
+            os.makedirs(family_dir)
+
+        sub_df = df_filtered.loc[df_filtered['family_name'] == family]
+        family_table = Path('{}/{}_raw_barcodes.parquet.snappy'.format(str(family_dir), family))
+        sub_df.to_parquet(family_table)
+
+        print('{} - Created raw barcode table for {}.'.format(datetime.now().strftime("%H:%M:%S"),family))
 
 ## BOLD
 
@@ -157,8 +182,9 @@ def extract_bold_tsvs(output_directories, marker):
     df_filtered = df.loc[df['markercode'] == marker] # the API still downloads other markers - so filter also at this step
     df_filtered = df_filtered.astype('string') # convert to strings, otherwise parquet crashes
     df_filtered = df_filtered.drop_duplicates() # drop potential duplicates
-    output_file_1 = '{}/{}.parquet.snappy'.format(output_directories[3], 'file_1')
-    df_filtered.to_parquet(output_file_1)
+
+    ## split and save a separate table for each family (will reduce runtimes significantly
+    split_raw_barcode_table(output_directories, df_filtered)
 
     print('{} - Finished data extraction from bold files.\n'.format(datetime.now().strftime("%H:%M:%S")))
 
@@ -386,9 +412,9 @@ def extract_genbank_files(output_directories):
         all_references_list.append(list(reference_dict.values()))
 
     ## create a dataframe
-    df = pd.DataFrame(all_references_list, columns=columns)
-    output_snappy = f'{output_directories[3]}/file_1.parquet.snappy'
-    df.to_parquet(output_snappy, index=False)
+    df_filtered = pd.DataFrame(all_references_list, columns=columns)
+    ## split and save a separate table for each family (will reduce runtimes significantly
+    split_raw_barcode_table(output_directories, df_filtered)
 
     # update taxids file
     taxids_dict_2 = pd.DataFrame([[key] + values for key,values in taxids_dict.items()], columns=taxids_df.columns)
@@ -396,12 +422,12 @@ def extract_genbank_files(output_directories):
 
     print('{} - Finished to collect data from .gb files.\n'.format(datetime.now().strftime("%H:%M:%S")))
 
-## Phylogeny
+####### PHYLOGENY #######
+
 # run alignment calculation
 def run_mafft(df, family, mafft_executable, folder, outgroup_fasta):
 
-    species_data = []
-    sp = 0
+    ambigous_assignments = []
 
     # family = 'Aeolosomatidae'
     # outgroup_fasta = '/Users/tillmacher/Downloads/fasta.fas'
@@ -412,13 +438,13 @@ def run_mafft(df, family, mafft_executable, folder, outgroup_fasta):
         os.makedirs(family_dir)
 
     ## required files to create
-    fasta_file = '{}/{}.fasta'.format(family_dir, family)
-    aln_file = '{}/{}.aln'.format(family_dir, family)
-    aln_file_reduced = aln_file + '.reduced'
-    aln_file_reduced_pickle = aln_file + '.reduced.pkl'
-    species_file = '{}/{}.species'.format(family_dir, family)
-    species_file_txt = species_file + ".txt"
-    species_file_txt_snappy = Path(species_file_txt + ".parquet.snappy")
+    fasta_file = Path('{}/{}.fasta'.format(family_dir, family))
+    aln_file = Path('{}/{}.aln'.format(family_dir, family))
+    aln_file_reduced = Path(str(aln_file) + '.reduced')
+    aln_file_reduced_pickle = Path(str(aln_file) + '.reduced.pkl')
+    species_file = Path('{}/{}.species'.format(family_dir, family))
+    species_file_txt = Path(str(species_file) + ".txt")
+    species_file_txt_snappy = Path(str(species_file_txt) + ".parquet.snappy")
 
     f_out = open(f'{family_dir}/0_mafft.stdout.txt', 'w')
     f_err = open(f'{family_dir}/0_mafft.stderr.txt', 'w')
@@ -429,14 +455,14 @@ def run_mafft(df, family, mafft_executable, folder, outgroup_fasta):
 
     else:
         ## Create fasta file
-        bold_records = df.loc[df['family_name'] == family].values.tolist()
+        raw_records = df.loc[df['family_name'] == family].values.tolist()
 
         # at least three sequences are required for the alignment!
-        if len(bold_records) < 4:
+        if len(raw_records) < 4:
 
             # create fasta file
             f = open(species_file_txt, 'w')
-            for record in bold_records:
+            for record in raw_records:
                 f.write('{}__{}\n'.format(record[68], record[21]))
             f.close()
             message =  '{} - Skipped alignment for {} (less than 4 sequences).'.format(datetime.now().strftime("%H:%M:%S"),family)
@@ -455,14 +481,14 @@ def run_mafft(df, family, mafft_executable, folder, outgroup_fasta):
             f = open(fasta_file, 'w')
 
             # enumerate to create unique identifier, which BOLD does not manage to do
-            for i, record in enumerate(bold_records):
+            for i, record in enumerate(raw_records):
 
                 # remove records with ambigous assignments
                 species = record[21]
                 special_characters = '!@#$%^&*()-+?_=,.<>/\'\"0123456789'
                 # search for special characters in the species name
                 if any(c in special_characters for c in species):
-                    species_data.append([record[68], record[21], 0, 'Ambiguous assignment'])
+                    ambigous_assignments.append([record[68], record[21], 0, 'Ambiguous assignment'])
                 else:
                     ## format the fasta header
                     header = '>{}__{}__{}\n'.format(record[68], record[21].replace(" ", '_'), i)
@@ -565,15 +591,15 @@ def run_phylo(df, family, iqtree_executable, folder, cpu_count):
         os.makedirs(family_dir)
 
     ## required files to create
-    aln_file = '{}/{}.aln'.format(family_dir, family)
-    aln_file_reduced = aln_file + '.reduced'
-    tree_file = aln_file_reduced + '.treefile'
-    species_file = '{}/{}.species'.format(family_dir, family)
-    species_file_txt = species_file + ".txt"
-    species_file_txt_snappy = Path(species_file_txt + ".parquet.snappy")
+    aln_file = Path('{}/{}.aln'.format(family_dir, family))
+    aln_file_reduced = Path(str(aln_file) + '.reduced')
+    tree_file = Path(str(aln_file_reduced) + '.treefile')
+    species_file = Path('{}/{}.species'.format(family_dir, family))
+    species_file_txt = Path(str(species_file) + ".txt")
+    species_file_txt_snappy = Path(str(species_file_txt) + ".parquet.snappy")
 
     ## collect bold records
-    bold_records = df.loc[df['family_name'] == family].values.tolist()
+    raw_records = df.loc[df['family_name'] == family].values.tolist()
 
     f_out = open(f'{family_dir}/1_phylo.stdout.txt', 'w')
     f_err = open(f'{family_dir}/1_phylo.stderr.txt', 'w')
@@ -587,7 +613,7 @@ def run_phylo(df, family, iqtree_executable, folder, cpu_count):
 
         # create fasta file
         f = open(species_file_txt, 'w')
-        for record in bold_records:
+        for record in raw_records:
             f.write('{}__{}\n'.format(record[68], record[21]))
         f.close()
 
@@ -609,14 +635,11 @@ def run_phylo(df, family, iqtree_executable, folder, cpu_count):
 
     print(message)
 
-## run species delnineation
-def run_mptp(df, family, mptp_executable, folder, outgroup_fasta):
+## run species delimitation
+def run_mptp(df, family, mptp_executable, folder):
 
-    # family = 'Branchinectidae'
-    # outgroup_fasta = '/Users/tillmacher/Downloads/fasta.fas'
-
+    # family = 'Viviparidae'
     species_data = []
-    sp = 0
 
     # Sub directories for output and temporary files
     family_dir = Path('{}/{}'.format(folder, family))
@@ -624,22 +647,16 @@ def run_mptp(df, family, mptp_executable, folder, outgroup_fasta):
         os.makedirs(family_dir)
 
     ## required files to create
-    aln_file = '{}/{}.aln'.format(family_dir, family)
-    aln_file_reduced = aln_file + '.reduced'
-    aln_file_reduced_pickle = aln_file + '.reduced.pkl'
-    tree_file = aln_file_reduced + '.treefile'
-    species_file = '{}/{}.species'.format(family_dir, family)
-    species_file_txt = species_file + ".txt"
-    species_file_txt_snappy = Path(species_file_txt + ".parquet.snappy")
+    aln_file = Path('{}/{}.aln'.format(family_dir, family))
+    aln_file_reduced = Path(str(aln_file) + '.reduced')
+    aln_file_reduced_pickle = Path(str(aln_file) + '.reduced.pkl')
+    tree_file = Path(str(aln_file_reduced) + '.treefile')
+    species_file = Path('{}/{}.species'.format(family_dir, family))
+    species_file_txt = Path(str(species_file) + ".txt")
+    species_file_txt_snappy = Path(str(species_file_txt) + ".parquet.snappy")
 
     ## collect bold records
-    bold_records = df.loc[df['family_name'] == family].values.tolist()
-
-    ## load ids and outgroup temporary names
-    # Load pickel file
-    with open(aln_file_reduced_pickle, 'rb') as handle:
-        ids_dict = pickle.load(handle)
-    outgroup = list(ids_dict.keys())[-1]
+    raw_records = df.loc[df['family_name'] == family].values.tolist()
 
     ## open log files
     f_out = open(f'{family_dir}/2_mptp.stdout.txt', 'w')
@@ -647,18 +664,24 @@ def run_mptp(df, family, mptp_executable, folder, outgroup_fasta):
 
     # Check if file already exists
     if os.path.isfile(species_file_txt_snappy):
-        print('{} - {} was already analysed!'.format(datetime.now().strftime("%H:%M:%S"),family))
+        message = '{} - {} was already analysed!'.format(datetime.now().strftime("%H:%M:%S"),family)
 
     elif not os.path.isfile(tree_file):
         message = '{} - {} is missing a tree file!'.format(datetime.now().strftime("%H:%M:%S"), family)
 
         # create fasta file
         f = open(species_file_txt, 'w')
-        for record in bold_records:
+        for record in raw_records:
             f.write('{}__{}\n'.format(record[68], record[21]))
         f.close()
 
     else:
+        ## load ids and outgroup temporary names
+        # Load pickel file
+        with open(aln_file_reduced_pickle, 'rb') as handle:
+            ids_dict = pickle.load(handle)
+        outgroup = list(ids_dict.keys())[-1]
+
         # identify species using mptp
         command = f"{mptp_executable} --ml --multi --tree_file {str(tree_file)} --outgroup {outgroup} --outgroup_crop --output {str(species_file)}"
         subprocess.run(command, shell=True, stdout=f_out, stderr=f_err)
@@ -670,7 +693,7 @@ def run_mptp(df, family, mptp_executable, folder, outgroup_fasta):
         if not os.path.isfile(species_file_txt):
             # create fasta file
             f = open(species_file_txt, 'w')
-            for record in bold_records:
+            for record in raw_records:
                 f.write('{}__{}\n'.format(record[68], record[21]))
             f.close()
             message = '{} - mptp encountered an error for {}.'.format(datetime.now().strftime("%H:%M:%S"), family)
@@ -707,22 +730,53 @@ def run_mptp(df, family, mptp_executable, folder, outgroup_fasta):
                             species_name = record.split('__')[1]
                             species_data.append([species_id, species_name, current_species, LRT])
 
+    ####################################################################################################################
+    ## create the species delimitation file
+
     ## check if a species delineation file was created
-    if os.path.isfile(species_file_txt_snappy):
+    if os.path.isfile(species_file_txt) and os.path.isfile(tree_file):
         ## write output file
         species_df = pd.DataFrame(species_data, columns=['species_id', 'species_name', 'current_species', 'LRT'])
-        species_df = species_df.drop_duplicates()
-        species_df = species_df.astype('string') # Convert to string, otherwise parquet crashes
-        species_df.to_parquet(species_file_txt_snappy, index=False)
-        message = '{} - Finished {}'.format(datetime.now().strftime("%H:%M:%S"), family)
+        message = '{} - Finished species delimitation for {}.'.format(datetime.now().strftime("%H:%M:%S"), family)
 
     else:
         ## write a dummy file if mptp failed
-        species_data = [[record[68], record[21], 0, 'Error'] for record in bold_records]
+        species_data = [[record[68], record[21], 0, 'Error'] for record in raw_records]
         species_df = pd.DataFrame(species_data, columns=['species_id', 'species_name', 'current_species', 'LRT'])
-        species_df = species_df.astype('string') # Convert to string, otherwise parquet crashes
-        species_df.to_parquet(species_file_txt_snappy, index=False)
-        message = '{} - Finished {}, but failed species delineation'.format(datetime.now().strftime("%H:%M:%S"), family)
+        message = '{} - Finished {}, but failed species delimitation'.format(datetime.now().strftime("%H:%M:%S"), family)
+
+    ## then create a species delimitation table
+    res = []
+    for species_group in set(species_df['current_species'].values.tolist()):
+        sub_df = species_df.loc[species_df['current_species'] == species_group]
+        LRT = list(set(sub_df['LRT'].values.tolist()))[0]
+        sub_df = sub_df.drop('LRT', axis=1)
+        n_records = len(sub_df)
+
+        ## monophyletic and more than 2 sequences == monophyletic (1)
+        if LRT == 'Passed' and n_records >= 2:
+            phylogeny = 'monophyletic'
+
+        ## monophyletic but single sequence == monophyletic (2)
+        elif LRT == 'Passed' and n_records < 2:
+            phylogeny = 'monophyletic (singleton)'
+
+        ## LRT failed == paraphyletic (1)
+        elif LRT == 'Failed':
+            phylogeny = 'paraphyletic (LRT failed)'
+
+        ## LRT insufficient data == paraphyletic (2)
+        else:
+            phylogeny = 'paraphyletic (insufficient data)'
+
+        ## add to results
+        for record in sub_df.values.tolist():
+            res.append(record + [0, phylogeny, 0])
+
+    ## write dataframe
+    df_out = pd.DataFrame(res, columns=['Sequence ID', 'Species Name', 'Cluster', 'Clade', 'State', 'Rating'])
+    df_out = df_out.astype('string')  # Convert to string, otherwise parquet crashes
+    df_out.to_parquet(species_file_txt_snappy, index=False)
 
     f_out.close()
     f_err.close()
@@ -764,209 +818,219 @@ def phylogenetic_approach(output_directories, mafft_executable, iqtree_executabl
     print('{} - Finished calculation of phylogenetic trees.\n'.format(datetime.now().strftime("%H:%M:%S")))
 
     # 3) perform species delineation
-    Parallel(n_jobs = cpu_count, backend='threading')(delayed(run_mptp)(df, family, mptp_executable, folder, outgroup_fasta) for family in families)
+    Parallel(n_jobs = cpu_count, backend='threading')(delayed(run_mptp)(df, family, mptp_executable, folder) for family in families)
     print('{} - Finished species delineation.\n'.format(datetime.now().strftime("%H:%M:%S")))
 
-    # Sleep one sec
-    time.sleep(1)
+####### RATING #######
 
-    print('{} - Finished phylogenetic approach.\n'.format(datetime.now().strftime("%H:%M:%S")))
+# function to rate each family
+def rate_family(output_directories, identifier_whitelist_lst, location_whitelist_lst, family):
 
-    print('{} - Starting to rate sequences (phylogeny).\n'.format(datetime.now().strftime("%H:%M:%S")))
+    # family = 'Viviparidae'
 
-    # Create a DataFrame
-    lst = []
-    for family in families:
-        lst.extend(pd.read_parquet('{}/{}/{}.species.txt.parquet.snappy'.format(folder, family, family)).values.tolist())
-    df_species = pd.DataFrame(lst, columns=['Sequence ID', 'Species Name', 'Species Group', 'LRT'])
+    # Sub directories for output and temporary files
+    family_dir = Path('{}/{}'.format(output_directories[2], family))
+    if not os.path.exists(family_dir):
+        os.makedirs(family_dir)
 
-    # Test Phylogeny
-    res = []
-    for species_group in set(df_species['Species Group'].values.tolist()):
-        sub_df = df_species.loc[df_species['Species Group'] == species_group]
-        taxon = list(set(sub_df['Species Name'].values.tolist()))
-        LRT = list(set(sub_df['LRT'].values.tolist()))[0]
-        sub_df = sub_df.drop('LRT', axis=1)
-        n_records = len(sub_df)
+    ## relevant files
+    species_file_txt_snappy = Path('{}/{}.species.txt.parquet.snappy'.format(str(family_dir), family))
+    ratings_file = Path('{}/{}.ratings.parquet.snappy'.format(str(family_dir), family))
+    family_table = Path('{}/{}_raw_barcodes.parquet.snappy'.format(str(family_dir), family))
 
-        ## monophyletic and more than 2 sequences == monophyletic (1)
-        if LRT == 'Passed' and n_records >= 2:
-            phylogeny = 'monophyletic'
+    # Collect information about records
+    df1 = pd.read_parquet(family_table).fillna('')
 
-        ## monophyletic but single sequence == monophyletic (2)
-        elif LRT == 'Passed' and n_records < 2:
-            phylogeny = 'monophyletic (singleton)'
+    ## store ratings in list
+    all_ratings_list = []
 
-        ## LRT failed == paraphyletic (1)
-        elif LRT == 'Failed':
-            phylogeny = 'paraphyletic (LRT failed)'
+    if os.path.isfile(ratings_file):
+        print('{} - Rating is already done for {}.'.format(datetime.now().strftime("%H:%M:%S"), family))
 
-        ## LRT insufficient data == paraphyletic (2)
-        else:
-            phylogeny = 'paraphyletic (insufficient data)'
+    else:
+        # Location white list
+        main_country = [i for i in location_whitelist_lst['main country'].values.tolist() if i != '']
+        neighbour_countries = [i for i in location_whitelist_lst['neighbour_countries'].values.tolist() if i != '']
+        continent = [i for i in location_whitelist_lst['continent'].values.tolist() if i != '']
 
-        ## add to results
-        for record in sub_df.values.tolist():
-            res.append(record + [0, phylogeny, 0])
+        ## read mPTP file
+        df2 = pd.read_parquet(species_file_txt_snappy)
 
-    df_out = pd.DataFrame(res, columns=['Sequence ID', 'Species Name', 'Species Group', 'Clade', 'State', 'Rating'])
-    df_out = df_out.astype('string')  # Convert to string, otherwise parquet crashes
-    output_file_2 = '{}/{}.parquet.snappy'.format(output_directories[3], 'file_2')
-    df_out.to_parquet(output_file_2, index=False)
+        ## rate each individual barcode of the family
+        for record in df2.values.tolist():
+            ## collect information about the record
+            # family file
+            sequenceID = record[0]
+            species_group = record[2]
+            clade = record[3]
+            phylogeny = record[4]
+            rating = int(record[5])
 
-    print('{} - Finished to rate sequences (phylogeny).\n'.format(datetime.now().strftime("%H:%M:%S")))
+            # raw table file
+            raw_record = df1.loc[df1['sequenceID'] == sequenceID].values.tolist()[0]
+            processid = raw_record[0]
+            institution_storing = raw_record[5]
+            bin_uri = raw_record[7]
+            phylum_name = raw_record[9]
+            class_name = raw_record[11]
+            order_name = raw_record[13]
+            family_name = raw_record[15]
+            genus_name = raw_record[19]
+            species_name = raw_record[21]
+            identification_by = raw_record[24]
+            country = raw_record[54]
+            province = raw_record[55]
+            region = raw_record[56]
+            exactsite = raw_record[58]
+            lifestage = raw_record[38]
+            sex = raw_record[39]
+            image_urls = raw_record[60]
+            markercode = raw_record[69]
+            nucleotides = raw_record[71]
+            sequence_quality = 'Sufficient' ## default to "sufficient and only change when good or bad
 
-## Rating system
+            ## phylogeny
+            if phylogeny == 'monophyletic':
+                rating += 15
+            elif phylogeny == 'monophyletic (singleton)':
+                rating += 5
 
+            ## trimm leading and trailing gaps from barcode
+            nucleotides_trimmed = nucleotides.strip('-').strip('N')
+            barcode_length = len(nucleotides_trimmed)
+
+            ## good sequence quality
+            allowed_chars = set('ACGT')
+            if set(nucleotides_trimmed).issubset(allowed_chars):
+                rating += 5
+                sequence_quality = 'Good'
+
+            ## bad sequence quality
+            not_allowed_chars = [i for i in set(nucleotides_trimmed) if i not in allowed_chars]
+            if len(not_allowed_chars) != 0:
+                n_not_allowed_chars = sum([nucleotides_trimmed.count(i) for i in not_allowed_chars])
+                rel = n_not_allowed_chars / len(nucleotides_trimmed) * 100
+                if rel >= 2:
+                    rating -= 10
+                    sequence_quality = 'Bad'
+
+            ## sequence length (>= 500 bp are accepted as barcode)
+            if len(nucleotides_trimmed) >= 500:
+                rating += 5
+
+            ## Identification white list
+            if identification_by in identifier_whitelist_lst:
+                rating += 10
+
+            ## Sampling location with white list
+            if country in main_country:
+                rating += 5
+            elif country in neighbour_countries:
+                rating += 4
+            elif country in continent:
+                rating += 3
+
+            ## Check if photo is available
+            if image_urls != '':
+                rating += 5
+
+            ## Available metadata
+            if province != '':
+                rating += 1
+            if region != '':
+                rating += 1
+            if exactsite != '':
+                rating += 1
+            if lifestage != '':
+                rating += 1
+            if sex != '':
+                rating += 1
+
+            all_ratings_list.append([rating, sequenceID, processid, bin_uri, phylum_name, class_name, order_name,
+                                     family_name, genus_name, species_name, clade, phylogeny, species_group, identification_by,
+                                     institution_storing, country, province, region, exactsite, lifestage, sex, image_urls, markercode,
+                                     sequence_quality, barcode_length, nucleotides])
+
+        # create unfiltered dataframe
+        ratings_df = pd.DataFrame(all_ratings_list, columns=["rating", "sequenceID", "processid", "bin_uri", "phylum_name", "class_name", "order_name",
+                                     "family_name", "genus_name", "species_name", "clade", "phylogeny", "species_group", "identification_by",
+                                     "institution_storing", "country", "province", "region", "exactsite", "lifestage", "sex", "image_urls", "markercode",
+                                     "sequence_quality", "barcode_length", "nucleotides"])
+        ratings_df = ratings_df.sort_values('rating', ascending=False)
+        ratings_df = ratings_df.astype('string')  # Convert to string, otherwise parquet crashes
+        ratings_df['rating'] = ratings_df['rating'].astype('int')
+        ratings_df['clade'] = ratings_df['clade'].astype('int')
+
+        # write to parquet
+        ratings_df.to_parquet(ratings_file, index=False)
+
+        print('{} - Finished rating for {}.'.format(datetime.now().strftime("%H:%M:%S"), family))
+
+# main script for rating algorithm
 def rating_system(output_directories, identifier_whitelist, location_whitelist, project_name):
+
+    print('{} - Collecting raw records.'.format(datetime.now().strftime("%H:%M:%S")))
+
+    # Collect information about records
+    file_1 = Path('{}/file_1.parquet.snappy'.format(output_directories[3]))
+    df1 = pd.read_parquet(file_1).fillna('')
+
+    ## collect all families
+    families = sorted(set(df1['family_name'].values.tolist()))
+
+    # Use most CPUs
+    cpu_count = multiprocessing.cpu_count() -1
+
+    identifier_whitelist_lst = pd.read_excel(identifier_whitelist).fillna('')['identifier_white_list'].values.tolist()
+    location_whitelist_lst = pd.read_excel(location_whitelist).fillna('')
+
+    ## for testing
+    # files_to_delete = glob.glob('/Volumes/Coruscant/dbDNA/FEI_genera_BarCodeBank/2_phylogeny/*/*.ratings.parquet.snappy')
+    # [os.remove(file) for file in files_to_delete if os.path.isfile(file)]
 
     print('{} - Starting to rate sequences.'.format(datetime.now().strftime("%H:%M:%S")))
 
-    all_ratings_list = []
+    ## rate all families in parallel
+    Parallel(n_jobs=cpu_count, backend='loky')(delayed(rate_family)(output_directories, identifier_whitelist_lst, location_whitelist_lst, family) for family in families)
 
-    # Identifier white list
-    identifier_white_list = pd.read_excel(identifier_whitelist).fillna('')['identifier_white_list'].values.tolist()
+    print('{} - Finished rating for all families.\n'.format(datetime.now().strftime("%H:%M:%S")))
 
-    # Location white list
-    country_white_list = pd.read_excel(location_whitelist).fillna('')
-    main_country = [i for i in country_white_list['main country'].values.tolist() if i != '']
-    neighbour_countries = [i for i in country_white_list['neighbour_countries'].values.tolist() if i != '']
-    continent = [i for i in country_white_list['continent'].values.tolist() if i != '']
+    # Initialize an empty list to hold all dataframes
+    dfs = []
 
-    # Collect phylogenetic approach values
-    file_1 = Path('{}/file_1.parquet.snappy'.format(output_directories[3]))
-    df1 = pd.read_parquet(file_1).fillna('')
-    file_2 = Path('{}/file_2.parquet.snappy'.format(output_directories[3]))
-    df2 = pd.read_parquet(file_2).fillna('')
+    for family in families:
+        family_dir = Path('{}/{}'.format(output_directories[2], family))
+        ratings_snappy = family_dir / '{}.ratings.parquet.snappy'.format(family)
 
-    t = 0
-    for record in tqdm(df2.values.tolist()):
-        t += 1
-        if t == 15000:
-            break
+        if not ratings_snappy.is_file():
+            print('{} - WARNING: No ratings file found for {}!!'.format(datetime.now().strftime("%H:%M:%S"), family))
+        else:
+            df = pd.read_parquet(ratings_snappy)
+            dfs.append(df)  # Append the dataframe to the list
 
-        # Collect information for the specific record
+    # Concatenate all dataframes in the list
+    ratings_df = pd.concat(dfs, ignore_index=True)
 
-        # Phylogeny file
-        sequenceID = record[0]
-        species_group = record[2]
-        clade = record[3]
-        phylogeny = record[4]
-        rating = int(record[5])
-
-        # BOLD record file
-        bold_record = df1.loc[df1['sequenceID'] == sequenceID].values.tolist()[0]
-        processid = bold_record[0]
-        institution_storing = bold_record[5]
-        bin_uri = bold_record[7]
-        phylum_name = bold_record[9]
-        class_name = bold_record[11]
-        order_name = bold_record[13]
-        family_name = bold_record[15]
-        genus_name = bold_record[19]
-        species_name = bold_record[21]
-        identification_by = bold_record[24]
-        country = bold_record[54]
-        province = bold_record[55]
-        region = bold_record[56]
-        exactsite = bold_record[58]
-        lifestage = bold_record[38]
-        sex = bold_record[39]
-        image_urls = bold_record[60]
-        markercode = bold_record[69]
-        nucleotides = bold_record[71]
-        sequence_quality = 'Sufficient'
-
-        ## phylogeny
-        if phylogeny == 'monophyletic':
-            rating += 15
-        elif phylogeny == 'monophyletic (singleton)':
-            rating += 5
-
-        ## trimm leading and trailing gaps from barcode
-        nucleotides_trimmed = nucleotides.strip('-').strip('N')
-
-        ## good sequence quality
-        allowed_chars = set('ACGT')
-        if set(nucleotides_trimmed).issubset(allowed_chars):
-            rating += 5
-            sequence_quality = 'Good'
-
-
-        ## bad sequence quality
-        not_allowed_chars = [i for i in set(nucleotides_trimmed) if i not in allowed_chars]
-        if len(not_allowed_chars) != 0:
-            n_not_allowed_chars = sum([nucleotides_trimmed.count(i) for i in not_allowed_chars])
-            rel = n_not_allowed_chars / len(nucleotides_trimmed) * 100
-            if rel >= 2:
-                rating -= 10
-                sequence_quality = 'Bad'
-
-        ## sequence length (>= 500 bp are accepted as barcode)
-        if len(nucleotides_trimmed) >= 500:
-            rating += 5
-            barcode_length = len(nucleotides_trimmed)
-
-        ## Identification white list
-        if identification_by in identifier_white_list:
-            rating += 10
-
-        ## Sampling location with white list
-        if country in main_country:
-            rating += 5
-        elif country in neighbour_countries:
-            rating += 4
-        elif country in continent:
-            rating += 3
-
-        ## Check if photo is available
-        if image_urls != '':
-            rating += 5
-
-        ## Available metadata
-        if province != '':
-            rating += 1
-        if region != '':
-            rating += 1
-        if exactsite != '':
-            rating += 1
-        if lifestage != '':
-            rating += 1
-        if sex != '':
-            rating += 1
-
-        all_ratings_list.append([rating, sequenceID, processid, bin_uri, phylum_name, class_name, order_name,
-                                 family_name, genus_name, species_name, clade, phylogeny, species_group, identification_by,
-                                 institution_storing, country, province, region, exactsite, lifestage, sex, image_urls, markercode,
-                                 sequence_quality, barcode_length, nucleotides])
-
-    # create unfiltered dataframe
-    ratings_df = pd.DataFrame(all_ratings_list, columns=["rating", "sequenceID", "processid", "bin_uri", "phylum_name", "class_name", "order_name",
-                                 "family_name", "genus_name", "species_name", "clade", "phylogeny", "species_group", "identification_by",
-                                 "institution_storing", "country", "province", "region", "exactsite", "lifestage", "sex", "image_urls", "markercode",
-                                 "sequence_quality", "barcode_length", "nucleotides"])
+    ## sort by rating
     ratings_df = ratings_df.sort_values('rating', ascending=False)
-    ratings_df = ratings_df.astype('string')  # Convert to string, otherwise parquet crashes
-    ratings_df['rating'] = ratings_df['rating'].astype('int')
-    ratings_df['clade'] = ratings_df['clade'].astype('int')
 
-    # filter dataframe according to the rating threshold
-    ratings_df_filtered = ratings_df.loc[ratings_df['rating'] >= 5]
-
-    # write to parquet
+    ## write all tables to a single file
     output_file_1 = Path('{}/{}.BarCodeBank.parquet.snappy'.format(output_directories[3], project_name))
     ratings_df.to_parquet(output_file_1, index=False)
-    output_file_2 = Path('{}/{}.BarCodeBank_filtered.parquet.snappy'.format(output_directories[3], project_name))
-    ratings_df_filtered.to_parquet(output_file_2, index=False)
+    print('{} - Saved database to .parquet.snappy.'.format(datetime.now().strftime("%H:%M:%S")))
 
-    # try to write to excel
-    try:
+    ## test if the dataframe can be written to excel
+    if ratings_df.shape[0] > 65000:
+        output_file_1 = Path('{}/{}.BarCodeBank.csv'.format(output_directories[3], project_name))
+        ratings_df.to_csv(output_file_1, index=False)
+        print('{} - Unable to write to .xlsx. Saved database to .csv instead!'.format(datetime.now().strftime("%H:%M:%S")))
+    else:
         output_file_1 = Path('{}/{}.BarCodeBank.xlsx'.format(output_directories[3], project_name))
-        ratings_df.to_excel(output_file_1, index=False)
-        output_file_2 = Path('{}/{}.BarCodeBank_filtered.xlsx'.format(output_directories[3], project_name))
-        ratings_df_filtered.to_excel(output_file_2, index=False)
-    except:
-        print('{} - Unable to write to xlsx.'.format(datetime.now().strftime("%H:%M:%S")))
+        ratings_df.to_csv(output_file_1, index=False)
+        print('{} - Saved database to .xlsx.'.format(datetime.now().strftime("%H:%M:%S")))
+
+    ## write to .fasta file
+
 
     print('{} - Finished to rate sequences.\n'.format(datetime.now().strftime("%H:%M:%S")))
 
@@ -974,66 +1038,26 @@ def create_report():
     ratings_snappy = Path('{}/{}.BarCodeBank.parquet.snappy'.format(output_directories[3], project_name))
     ratings_df = pd.read_parquet(ratings_snappy)
 
-    ratings_filtered_snappy = Path('{}/{}.BarCodeBank_filtered.parquet.snappy'.format(output_directories[3], project_name))
-    ratings_df_filtered = pd.read_parquet(ratings_filtered_snappy)
-
     ##### PLOT 1 #####
     ## Rating distribution
     all_ratings = ratings_df['rating'].values.tolist()
-    max_rating = 35 # ADJUST THIS IF THE POINTS CHANGE!!
+    max_rating = 50 # ADJUST THIS IF THE POINTS CHANGE!!
     y = [all_ratings.count(i) for i in range(1,max_rating+1)]
 
     fig = go.Figure()
     # BRONZE
-    fig.add_vrect(x0=4.5, x1=14.5, line_width=0, fillcolor="Peru", opacity=0.3, layer='below')
+    fig.add_vrect(x0=9.5, x1=24.5, line_width=0, fillcolor="Peru", opacity=0.3, layer='below')
     # SILVER
-    fig.add_vrect(x0=14.5, x1=24.5, line_width=0, fillcolor="Silver", opacity=0.3, layer='below')
+    fig.add_vrect(x0=24.5, x1=39.5, line_width=0, fillcolor="Silver", opacity=0.3, layer='below')
     # GOLD
-    fig.add_vrect(x0=24.5, x1=35.5, line_width=0, fillcolor="Gold", opacity=0.3, layer='below')
+    fig.add_vrect(x0=39.5, x1=50.5, line_width=0, fillcolor="Gold", opacity=0.3, layer='below')
     fig.add_trace(go.Bar(x=[i for i in range(0,max_rating+1)], y=y, marker_color='navy', marker_line_color='navy'))
-    fig.update_layout(template='simple_white', width=600, height=500)
-    fig.update_yaxes(title='Reference sequences', dtick='linear')
+    fig.update_layout(template='simple_white', width=800, height=500)
+    fig.update_yaxes(title='Reference sequences')
     fig.update_xaxes(title='Rating', dtick='linear')
     fig.write_image('/Users/tillmacher/Desktop/Projects/dbDNA/Präsentationen/report_a.pdf')
 
-    ##### PLOT 2 #####
-    ## Number of sequences per species
-    all_species = [i for i in ratings_df['species_name'].values.tolist() if i != 'No Match']
-    res = {i:all_species.count(i) for i in set(all_species)}
-    res = dict(sorted(res.items(), key=lambda item: item[1]))
-
-    x = list(res.values())[-30:]
-    y = list(res.keys())[-30:]
-
-    fig = go.Figure()
-    fig.add_trace(go.Bar(x=x, y=y, orientation='h'))
-    fig.update_layout(template='simple_white', width=600, height=500)
-    fig.update_xaxes(title='Reference sequences')
-    fig.update_yaxes(dtick='linear')
-    fig.write_image('/Users/tillmacher/Desktop/Projects/dbDNA/Präsentationen/report_b.pdf')
-
-    ##### PLOT 3 #####
-    ## Average rating per species
-    all_species = ratings_df.sort_values('family_name', ascending=False)['species_name'].drop_duplicates().values.tolist()
-    fig = go.Figure()
-    res = {}
-    for species in all_species:
-        ratings = ratings_df.loc[ratings_df['species_name'] == species]['rating'].values.tolist()
-        avg = np.average(ratings)
-        res[species] = [avg, ratings]
-    # sort the species to only show the x top species
-    res = dict(sorted(res.items(), key=lambda item: item[1][0]))
-    top_species = list(res.keys())[-50:]
-
-    for species in top_species:
-        ratings = res[species][1]
-        fig.add_trace(go.Box(x=ratings, name=species, orientation='h'))
-
-    fig.update_layout(template='simple_white', width=600, height=500)
-    fig.update_xaxes(title='Reference sequences', range=(0,35))
-    fig.write_image('/Users/tillmacher/Desktop/Projects/dbDNA/Präsentationen/report_c.pdf')
-
-## BLASTn
+####### BLAST DATABASE #######
 
 def create_database(output_directories, project_name, makeblastdb_exe):
 
@@ -1079,74 +1103,85 @@ def create_database(output_directories, project_name, makeblastdb_exe):
 
 ########################################################################################################################
 
+# settings_xlsx = '/Volumes/Coruscant/dbDNA/settings_mzb_mac.xlsx'
+
+## load settings file
+## collect user input from command line
 if len(sys.argv) > 1:
     settings_xlsx = Path(sys.argv[1])
+## otherwise set to default location
 else:
     settings_xlsx = Path('./settings.xlsx')
 
-# Collect tasks to run from settings file
-tasks = pd.read_excel(settings_xlsx, sheet_name='Tasks')
-data_source = tasks.values.tolist()[0][2]
-run_download = tasks.values.tolist()[1][2]
-run_extraction = tasks.values.tolist()[2][2]
-run_phylogeny = tasks.values.tolist()[3][2]
-run_rating = tasks.values.tolist()[4][2]
-run_create_database = tasks.values.tolist()[5][2]
+## check if settings file is existing
+if not os.path.isfile(settings_xlsx):
+    user_input = input("Please provide the (full) PATH to a settings file:\n")
+    settings_xlsx = Path(user_input)
 
-# Collect variables from settings file
-variables = pd.read_excel(settings_xlsx, sheet_name='Variables')
-project_name = variables.values.tolist()[0][2]
-taxa_list = variables.values.tolist()[1][2]
-identifier_whitelist = variables.values.tolist()[2][2]
-location_whitelist = variables.values.tolist()[3][2]
-output_folder = variables.values.tolist()[4][2]
-marker = variables.values.tolist()[5][2]
-min_rating = variables.values.tolist()[6][2]
-download_overwrite = variables.values.tolist()[7][2]
-alignment_overwrite = variables.values.tolist()[8][2]
-tree_overwrite = variables.values.tolist()[9][2]
-mafft_executable = variables.values.tolist()[10][2]
-iqtree_executable = variables.values.tolist()[11][2]
-mptp_executable = variables.values.tolist()[12][2]
-makeblastdb_exe = variables.values.tolist()[13][2]
-midori2_fasta = variables.values.tolist()[14][2]
-outgroup_fasta = variables.values.tolist()[15][2]
+## check if settings file is existing
+if not os.path.isfile(settings_xlsx):
+    print('Could not find the settings.xlsx!\n')
 
-########################################################################################################################
+## run main script
+else:
+    # Collect tasks to run from settings file
+    tasks = pd.read_excel(settings_xlsx, sheet_name='Tasks')
+    data_source = tasks.values.tolist()[0][2]
+    run_download = tasks.values.tolist()[1][2]
+    run_extraction = tasks.values.tolist()[2][2]
+    run_phylogeny = tasks.values.tolist()[3][2]
+    run_rating = tasks.values.tolist()[4][2]
+    run_create_database = tasks.values.tolist()[5][2]
 
-new_project = 'yes'
-if new_project == 'yes':
-    output_directories = create_new_project(project_name, output_folder)
+    # Collect variables from settings file
+    variables = pd.read_excel(settings_xlsx, sheet_name='Variables')
+    project_name = variables.values.tolist()[0][2]
+    taxa_list = variables.values.tolist()[1][2]
+    identifier_whitelist = variables.values.tolist()[2][2]
+    location_whitelist = variables.values.tolist()[3][2]
+    output_folder = variables.values.tolist()[4][2]
+    marker = variables.values.tolist()[5][2]
+    min_rating = variables.values.tolist()[6][2]
+    download_overwrite = variables.values.tolist()[7][2]
+    alignment_overwrite = variables.values.tolist()[8][2]
+    tree_overwrite = variables.values.tolist()[9][2]
+    mafft_executable = variables.values.tolist()[10][2]
+    iqtree_executable = variables.values.tolist()[11][2]
+    mptp_executable = variables.values.tolist()[12][2]
+    makeblastdb_exe = variables.values.tolist()[13][2]
+    midori2_fasta = variables.values.tolist()[14][2]
+    outgroup_fasta = variables.values.tolist()[15][2]
 
-if run_download == 'yes':
-    # BOLD systems workflow
-    if data_source == 'BOLD':
-        download_data_from_bold(taxa_list, output_directories, marker)
+    ########################################################################################################################
 
-    # GenBank workflow
-    elif data_source == 'NCBI':
-        extract_MIDORI2_file(midori2_fasta, output_directories, taxa_list)
+    new_project = 'yes'
+    if new_project == 'yes':
+        output_directories = create_new_project(project_name, output_folder)
 
-if run_extraction == 'yes':
-    # BOLD systems workflow
-    if data_source == 'BOLD':
-        extract_bold_tsvs(output_directories, marker)
+    if run_download == 'yes':
+        # BOLD systems workflow
+        if data_source == 'BOLD':
+            download_data_from_bold(taxa_list, output_directories, marker)
 
-    # GenBank workflow
-    elif data_source == 'NCBI':
-        extract_genbank_files(output_directories)
+        # GenBank workflow
+        elif data_source == 'NCBI':
+            extract_MIDORI2_file(midori2_fasta, output_directories, taxa_list)
 
-if run_phylogeny == 'yes':
-    phylogenetic_approach(output_directories, mafft_executable, iqtree_executable, mptp_executable)
+    if run_extraction == 'yes':
+        # BOLD systems workflow
+        if data_source == 'BOLD':
+            extract_bold_tsvs(output_directories, marker)
 
-if run_rating == 'yes':
-    rating_system(output_directories, identifier_whitelist, location_whitelist, project_name)
+        # GenBank workflow
+        elif data_source == 'NCBI':
+            extract_genbank_files(output_directories)
 
-if run_create_database == 'yes':
-    create_database(output_directories, project_name, makeblastdb_exe)
+    if run_phylogeny == 'yes':
+        phylogenetic_approach(output_directories, mafft_executable, iqtree_executable, mptp_executable)
 
+    if run_rating == 'yes':
+        rating_system(output_directories, identifier_whitelist, location_whitelist, project_name)
 
+    if run_create_database == 'yes':
+        create_database(output_directories, project_name, makeblastdb_exe)
 
-'./decenttree -fasta /Volumes/Coruscant/dbDNA/test/Limoniidae.aln -out /Volumes/Coruscant/dbDNA/test/Limoniidae.newick -t BIONJ'
-
-'/Volumes/Coruscant/dbDNA/programs/mptp --ml --multi --tree_file /Volumes/Coruscant/dbDNA/test/Ameletidae.newick --output /Volumes/Coruscant/dbDNA/test/Ameletidae.species'

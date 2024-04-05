@@ -159,6 +159,37 @@ Example data that was used for the creation a database for European freshwater i
 * All species of all genera classified as European freshwater fish and lamprey (according to [freshwaterecology.info](https://www.freshwaterecology.info/index.php)).
 * A filtered and unfilitered version is available [here](https://www.freshwaterecology.info/index.php).
 
+## Benchmark
+* Runtimes for the SeqRanker database creation are optimized for parallelization.
+* Increasing the number of available cores will signficantly reduce runtimes.
+* However, even large databases can be curated on average hardware.
+
+#### Example
+* All genera of all European freshwater macroinvertebrates, available on freshwater-ecology.info.
+* In total 500,521k records were downloaded from BOLDsystems.
+* Executed on a MacBook M1 Pro 2021 (16GB RAM, 8 cores).
+
+| **Runtime (min)** | **Step** |
+| --- | --- |
+| 124 | Sequence download |
+| 2 | Record extraction |
+| 20 | Alignments |
+| 120 | ML tree |
+| 10 | Species delimitation |
+| 8 | Barcode ranking |
+| 6 | Database creation |
+
+
 ## Citation
 
+#### SeqRanker
 _Coming soon..._
+
+#### mafft
+Katoh, K., Misawa, K., Kuma, K., & Miyata, T. (2002). MAFFT: A novel method for rapid multiple sequence alignment based on fast Fourier transform. Nucleic Acids Research, 30(14), 3059–3066. https://doi.org/10.1093/nar/gkf436
+
+#### IQ-Tree
+Nguyen, L.-T., Schmidt, H. A., von Haeseler, A., & Minh, B. Q. (2015). IQ-TREE: A Fast and Effective Stochastic Algorithm for Estimating Maximum-Likelihood Phylogenies. Molecular Biology and Evolution, 32(1), 268–274. https://doi.org/10.1093/molbev/msu300
+
+#### mPTP
+Kapli, P., Lutteropp, S., Zhang, J., Kobert, K., Pavlidis, P., Stamatakis, A., & Flouri, T. (2017). Multi-rate Poisson tree processes for single-locus species delimitation under maximum likelihood and Markov chain Monte Carlo. Bioinformatics, 33(11), 1630–1638. https://doi.org/10.1093/bioinformatics/btx025

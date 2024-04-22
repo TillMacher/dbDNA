@@ -123,11 +123,11 @@ Example data that was used for the creation a database for European freshwater i
 | neighbour country OR  | 4                 | The specimen was collected in a neighbouring country |
 | continent             | 3                 | The specimen was collected on the same continent |
 | image                 | 5                 | An image is available                         |
-| province              | 1                 | The metadata available                            |
-| region                | 1                 | The metadata available                            |
-| exactsite             | 1                 | The metadata available                            |
-| lifestage             | 1                 | The metadata available                            |
-| sex                   | 1                 | The metadata available                            |
+| province              | 1                 | The metadata is available                            |
+| region                | 1                 | The metadata is available                            |
+| exactsite             | 1                 | The metadata is available                            |
+| lifestage             | 1                 | The metadata is available                            |
+| sex                   | 1                 | The metadata is available                            |
 
 * Each record can gain between 50 (excellent) and -10 (highly unreliable) points.
 * All records are categorized according to their points.

@@ -571,7 +571,7 @@ def run_mafft(family, mafft_executable, folder, outgroup_fasta):
                     else:
                         reduced_fasta_dict[seq] = reduced_fasta_dict[seq] + [id]
 
-            ## write reduce fasta file
+            ## write reduced fasta file
             ids_pickle = {}
             f = open(aln_file_reduced, 'w')
             i = 0
@@ -708,7 +708,7 @@ def run_mptp(family, mptp_executable, folder):
         ## sleep to give time to write the file (happened several times that the file was not yet properly written)
         time.sleep(10)
 
-        ## check if a species delineation file was created
+        ## check if a species delimitation file was created
         if not os.path.isfile(species_file_txt):
             # create dummy species txt file
             f = open(species_file_txt, 'w')
@@ -800,7 +800,7 @@ def run_mptp(family, mptp_executable, folder):
     ####################################################################################################################
     ## create the species delimitation file
 
-    ## check if a species delineation file was created
+    ## check if a species delimitation file was created
     if not os.path.isfile(species_file_txt_snappy):
         ## write a dummy file if mptp failed
         species_data = [[record[68], record[21], '', '', 'Error', 0] for record in raw_records]
@@ -848,10 +848,10 @@ def phylogenetic_approach(output_directories, mafft_executable, iqtree_executabl
     print('{} - Checkpoint: {}'.format(datetime.now().strftime("%H:%M:%S"), time_diff(t0)))
     print('{} - Finished calculation of phylogenetic trees.\n'.format(datetime.now().strftime("%H:%M:%S")))
 
-    # 3) perform species delineation
+    # 3) perform species delimitation
     Parallel(n_jobs = cpu_count, backend='threading')(delayed(run_mptp)(family, mptp_executable, folder) for family in families)
     print('{} - Checkpoint: {}'.format(datetime.now().strftime("%H:%M:%S"), time_diff(t0)))
-    print('{} - Finished species delineation.\n'.format(datetime.now().strftime("%H:%M:%S")))
+    print('{} - Finished species delimitation.\n'.format(datetime.now().strftime("%H:%M:%S")))
 
 ####### RATING #######
 
@@ -1082,8 +1082,8 @@ def create_report():
     fig.add_vrect(x0=24.5, x1=39.5, line_width=0, fillcolor="Silver", opacity=0.3, layer='below')
     # GOLD
     fig.add_vrect(x0=39.5, x1=50.5, line_width=0, fillcolor="Gold", opacity=0.3, layer='below')
-    fig.add_trace(go.Bar(x=[i for i in range(0,max_rating+1)], y=y, marker_color='navy', marker_line_color='navy'))
-    fig.update_layout(template='simple_white', width=800, height=500)
+    fig.add_trace(go.Bar(x=[i for i in range(-10,max_rating+1)], y=y, marker_color='navy', marker_line_color='navy'))
+    fig.update_layout(template='simple_white', width=900, height=500)
     fig.update_yaxes(title='Reference sequences')
     fig.update_xaxes(title='Rating', dtick='linear')
     fig.write_image('/Users/tillmacher/Desktop/Projects/dbDNA/Präsentationen/report_a.pdf')
@@ -1183,6 +1183,45 @@ def create_report():
         if barcode in tmp['Sequence ID'].values.tolist():
             print(barcode)
 
+def blastn_report():
+    taxontable_xlsx = '/Users/tillmacher/Desktop/TTT_projects/Projects/dbDNA/TaXon_tables/dbDNA_taxon_table_cons_NCsub_mzb.xlsx'
+    df = pd.read_excel(taxontable_xlsx).fillna('')
+
+    ## figure 1: rankings
+    colors = ['Gold', 'Silver', 'Peru', 'darkgrey']
+    values = df['Status'].values.tolist()
+    res = {i:values.count(i) for i in sorted(df['Status'].drop_duplicates()) if i != ''}
+    fig = go.Figure()
+    x_values = list(res.values())
+    y_values = list(res.keys())
+    fig.add_trace(go.Bar(x=x_values[::-1], y=y_values[::-1], text=x_values[::-1], marker_color=colors[::-1], orientation='h'))
+    fig.update_layout(template='simple_white', width=500, height=500)
+    fig.update_xaxes(title='# OTUs')
+    fig.write_image('/Users/tillmacher/Desktop/Projects/dbDNA/Präsentationen/report_d.pdf')
+
+    ## figure 2: ratings per taxon
+    fig = go.Figure()
+    taxonomic_level = 'Order'
+    taxa = [i for i in sorted(df[taxonomic_level].drop_duplicates()) if i != '']
+    ## collect all ratings per taxon and then sort the dict for better visualization
+    res = {taxon:np.mean(df.loc[df[taxonomic_level] == taxon]['rating'].values.tolist()) for taxon in taxa}
+    res = dict(sorted(res.items(), key=lambda kv: kv[1]))
+    ## plot ratings of all taxa as boxpots
+    for taxon, values in res.items():
+        if values >40:
+            color = colors[0]
+        elif values >25:
+            color = colors[1]
+        elif values >9:
+            color = colors[2]
+        else:
+            color = colors[3]
+        y_values = df.loc[df[taxonomic_level] == taxon]['rating'].values.tolist()
+        fig.add_trace(go.Box(x=y_values, marker_color=color, line_width=1, orientation='h', name=taxon))
+    fig.update_layout(template='simple_white', width=800, height=600, showlegend=False)
+    fig.update_xaxes(title='OTU rating')
+    fig.write_image('/Users/tillmacher/Desktop/Projects/dbDNA/Präsentationen/report_e.pdf')
+
 ####### BLAST DATABASE #######
 
 def create_database(output_directories, project_name, makeblastdb_exe):
@@ -1247,6 +1286,7 @@ def clear_folders():
 ## collect user input from command line
 if len(sys.argv) > 1:
     settings_xlsx = Path(sys.argv[1])
+
 ## otherwise set to default location
 else:
     settings_xlsx = Path('./settings.xlsx')
@@ -1342,6 +1382,8 @@ else:
 
     if run_create_database == 'yes':
         create_database(output_directories, project_name, makeblastdb_exe)
+        # blastn -database /Volumes/Coruscant/dbDNA/FEI_genera_BarCodeBank/4_FEI_genera_database -query_fasta /Volumes/Coruscant/dbDNA/GeDNA_MZB_blast/GeDNA_MZB_all_apscale_OTUs_done.fasta
+        # filter -database /Volumes/Coruscant/dbDNA/FEI_genera_BarCodeBank/4_FEI_genera_database -blastn_folder /Users/tillmacher/Documents/GitHub/APSCALE_blast/blastn_GeDNA_MZB_all_apscale_OTUs_done_04_21_24
 
 
     ## close the log file

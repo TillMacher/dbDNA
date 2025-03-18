@@ -2,7 +2,7 @@
 
 ## Introduction
 
-Text
+This is still a preliminary version! An official release will come soon :)
 
 ## Installation
 #### SeqRanker pipeline

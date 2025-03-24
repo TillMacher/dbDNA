@@ -47,24 +47,27 @@ Sheet 1 contains the Run parameters. **Here, the "Run" column is to be modified*
 
 Sheet 2 contains the database information and source files. **Here, the "User input" column is to be modified**
 
-| **Variable**          | **User input**          | **Comment**                               | **Options** |
-|:----------------------|:------------------------|:------------------------------------------|:------------|
-| project name          | **Invertebrate_example_database** | Name of the database                  | string      |
-| taxa list             | **/PATH/invertebrates.xlsx** | Excel file containing taxa to download    | PATH        |
-| identifier whitelist  | **/PATH/identifier_white_list.xlsx** | Enter path to identifier whitelist | PATH        |
-| location whitelist    | **/PATH/country_white_list.xlsx** | Enter path to location whitelist   | PATH        |
-| output folder         | **/PATH/example**           | Enter path to output directory             | PATH        |
-| marker                | **COI-5P**                   | Marker to download                         | string      |
-| rating minimum        | **5**                       | Keep only sequences that are >= X          | yes / no    |
-| download overwrite    | **yes**                     | Overwrite existing files?                  | yes / no    |
-| alignment overwrite   | **yes**                     | Overwrite existing files?                  | yes / no    |
-| tree overwrite        | **yes**                     | Overwrite existing files?                  | yes / no    |
-| mafft executable      | **/PATH/mafft**             | Either "mafft" or "PATH/TO/mafft"           | PATH        |
-| iqtree executable     | **/PATH/iqtree2**           | Either "iqtree" or "PATH/TO/iqtree"         | PATH        |
-| mptp executable       | **/PATH/mptp**              | Either "mptp" or "PATH/TO/mptp"             | PATH        |
-| makeblastdb executable | **/PATH/makeblastdb**      | Either "makeblastdb" or "PATH/TO/makeblastdb" | PATH        |
-| MIDORI2 fasta         |                          | Enter path to MDORI2 file                  | PATH        |
-| outgroup_fasta        | **/PATH/outgroup.fasta**    | Enter path to outgroup sequence             | PATH        |
+| Category                      | Rating | Comment                                                              |
+|-------------------------------|--------|----------------------------------------------------------------------|
+| monophyletic OR               | 15     | Evaluation of species delimitation results                             |
+| monophyletic (singleton)       | 5      |                                                                      |
+| Reverse BIN taxonomy          | -10    | Automated assignment based on similarity to other barcodes             |
+| good sequence quality         | 6      | Sequence contains AGCT only                                            |
+| bad sequence quality          | -10    | Sequence contains more than 2% not AGCT                                |
+| longer than or equal to 500 bp | 5      | Recommended barcode length is >= 500 bp                                |
+| identifier on whitelist       | 10     | Specimens identified by experts are preferred                           |
+| main country OR               | 9      | Either country or coordinates are evaluated                            |
+| neighbour country OR          | 6      |                                                                      |
+| continent                     | 3      |                                                                      |
+| distance <= d1 OR             | 9      |                                                                      |
+| distance <= d2 OR             | 6      |                                                                      |
+| distance <= d3                | 3      |                                                                      |
+| province                      | 1      | Available metadata                                                   |
+| region                        | 1      | Available metadata                                                   |
+| exactsite                     | 1      | Available metadata                                                   |
+| lifestage                     | 1      | Available metadata                                                   |
+| sex                           | 1      | Available metadata                                                   |
+| Ambiguous identification      | -20    | No species-level identification: set rating to -20                    |
 
 ## Run SeqRanker
 First, prepare the settings file according to your needs. Then, the SeqRanker pipeline can easily be initiated via the following command(s):

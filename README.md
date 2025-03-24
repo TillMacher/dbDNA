@@ -14,8 +14,6 @@ To update SeqRanker run:
 
 `pip3 install --upgrade seqranker`
 
-Alternatively, standalone versions of the SeqRanker pipeline for Windows11 and MacOS (tested on Ventura 13.5) are available under the [latest release](https://github.com/TillMacher/dbDNA/releases).
-
 #### Further Dependencies
 
 Besides the main script, several other programs are required for the database creation. Please follow the installation instructions for your operating system for each software.
@@ -23,11 +21,8 @@ Besides the main script, several other programs are required for the database cr
 #### mafft
 Mafft is software to calculate multiple sequence alignments and is required the phylogenetic approach. More information about the installation of mafft can be found [here](https://mafft.cbrc.jp/alignment/software/).
 
-#### IQ-TREE
-IQ-TREE is a phylogenomic software that calculate maximum likelihood trees. IQ-TREE is required to for the phylogenetic approach. More information about the installation of IQ-TREE can be found [here](https://github.com/iqtree/iqtree2).
+#### VSEARCH
 
-#### mPTP
-mPTP is a software that is applied for species delimitation using the multi-rate Poisson Tree Processes. More information about the installation of mPTP can be found [here](https://github.com/Pas-Kapli/mptp)
 
 #### BLAST+
 BLAST+ is a software to create BLAST databases and perform BLAST searches on custom (local) databases. More information about the installation of BLAST+ can be found [here](https://blast.ncbi.nlm.nih.gov/doc/blast-help/downloadblastdata.html#downloadblastdata).
@@ -74,13 +69,9 @@ Sheet 2 contains the database information and source files. **Here, the "User in
 ## Run SeqRanker
 First, prepare the settings file according to your needs. Then, the SeqRanker pipeline can easily be initiated via the following command(s):
 
-#### pypi version
+#### Run the pipeline
 * Open a new terminal
 * Execute: `seqranker ./PATH/TO/FOLDER/settings.xlsx`
-
-#### standalone version
-* Doubleclick on the `seqranker_v0.1-macosx-ventura` or `seqranker_v0.1-W11` executable.
-* Provide the settings.xlsx file.
 
 ## Example data
 Example data that was used for the creation a database for European freshwater invertebrates can be found [here](https://github.com/TillMacher/dbDNA/tree/main/european_freshwater_invertebrates):
@@ -103,8 +94,7 @@ Example data that was used for the creation a database for European freshwater i
 #### Step 2: Species delineation
 * The sequences of all records of each family in the dataset are combined in a separate .fasta file.
 * A multiple sequence alignment for each family is calculated, using _mafft_.
-* A maximum likelihood tree for each family is calculated, using _IQ-Tree_ (fast option).
-* Species are delimited for each family, using _mPTP_.
+* Species are delimited for each family, using _VSEARCH_, based on a 99% similarity clustering.
 * The species delimitation results are used evaluate if a species record is mono- or paraphyletic.
 
 #### Step 3: Rating system

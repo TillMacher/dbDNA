@@ -36,14 +36,18 @@ The SeqRanker pipeline collects the required information from an [Excel file](ht
 
 Sheet 1 contains the Run parameters. **Here, the "Run" column is to be modified**
 
-| **Task**          | **Run** | **Comment**                       |
-|:------------------|:-------:|:----------------------------------|
-| source            | **BOLD**    | define source                     |
-| download          | **yes**      | download BOLD/NCBI data          |
-| extract           | **yes**      | extract BOLD/NCBI data           |
-| phylogeny         | **yes**     | calculate phylogenetic trees      |
-| rating            | **yes**     | create table and rate records     |
-| create database   | **yes**     | create blast database             |
+| Task               | Run  | Comment                             |
+|--------------------|------|-------------------------------------|
+| source             | BOLD | define source                       |
+| download           | yes   | download BOLD/NCBI data             |
+| extract            | yes  | extract BOLD/NCBI data              |
+| blacklist          | yes  | exclude records from blacklist      |
+| phylogeny          | yes  | calculate phylogenetic trees        |
+| rating             | yes  | create table and rate records       |
+| create database    | yes  | create blast database               |
+| create report      | yes  | summarize database                 |
+| version comparison | yes  | compare current db to old versions  |
+
 
 Sheet 2 contains the database information and source files. **Here, the "User input" column is to be modified**
 

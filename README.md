@@ -22,7 +22,7 @@ Besides the main script, several other programs are required for the database cr
 Mafft is software to calculate multiple sequence alignments and is required the phylogenetic approach. More information about the installation of mafft can be found [here](https://mafft.cbrc.jp/alignment/software/).
 
 #### VSEARCH
-
+VSEARCH is a software to manipulate sequenec data.  More information about the installation of VSEARCH can be found [here](https://github.com/torognes/vsearch).
 
 #### BLAST+
 BLAST+ is a software to create BLAST databases and perform BLAST searches on custom (local) databases. More information about the installation of BLAST+ can be found [here](https://blast.ncbi.nlm.nih.gov/doc/blast-help/downloadblastdata.html#downloadblastdata).

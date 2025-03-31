@@ -2,7 +2,7 @@
 
 ## Introduction
 
-Text
+This is still a preliminary version! An official release will come soon :)
 
 ## Installation
 #### SeqRanker pipeline
@@ -14,8 +14,6 @@ To update SeqRanker run:
 
 `pip3 install --upgrade seqranker`
 
-Alternatively, standalone versions of the SeqRanker pipeline for Windows11 and MacOS (tested on Ventura 13.5) are available under the [latest release](https://github.com/TillMacher/dbDNA/releases).
-
 #### Further Dependencies
 
 Besides the main script, several other programs are required for the database creation. Please follow the installation instructions for your operating system for each software.
@@ -23,11 +21,8 @@ Besides the main script, several other programs are required for the database cr
 #### mafft
 Mafft is software to calculate multiple sequence alignments and is required the phylogenetic approach. More information about the installation of mafft can be found [here](https://mafft.cbrc.jp/alignment/software/).
 
-#### IQ-TREE
-IQ-TREE is a phylogenomic software that calculate maximum likelihood trees. IQ-TREE is required to for the phylogenetic approach. More information about the installation of IQ-TREE can be found [here](https://github.com/iqtree/iqtree2).
-
-#### mPTP
-mPTP is a software that is applied for species delimitation using the multi-rate Poisson Tree Processes. More information about the installation of mPTP can be found [here](https://github.com/Pas-Kapli/mptp)
+#### VSEARCH
+VSEARCH is a software to manipulate sequenec data.  More information about the installation of VSEARCH can be found [here](https://github.com/torognes/vsearch).
 
 #### BLAST+
 BLAST+ is a software to create BLAST databases and perform BLAST searches on custom (local) databases. More information about the installation of BLAST+ can be found [here](https://blast.ncbi.nlm.nih.gov/doc/blast-help/downloadblastdata.html#downloadblastdata).
@@ -41,46 +36,49 @@ The SeqRanker pipeline collects the required information from an [Excel file](ht
 
 Sheet 1 contains the Run parameters. **Here, the "Run" column is to be modified**
 
-| **Task**          | **Run** | **Comment**                       |
-|:------------------|:-------:|:----------------------------------|
-| source            | **BOLD**    | define source                     |
-| download          | **yes**      | download BOLD/NCBI data          |
-| extract           | **yes**      | extract BOLD/NCBI data           |
-| phylogeny         | **yes**     | calculate phylogenetic trees      |
-| rating            | **yes**     | create table and rate records     |
-| create database   | **yes**     | create blast database             |
+| Task               | Run  | Comment                             |
+|--------------------|------|-------------------------------------|
+| source             | BOLD | define source                       |
+| download           | yes   | download BOLD/NCBI data             |
+| extract            | yes  | extract BOLD/NCBI data              |
+| blacklist          | yes  | exclude records from blacklist      |
+| phylogeny          | yes  | calculate phylogenetic trees        |
+| rating             | yes  | create table and rate records       |
+| create database    | yes  | create blast database               |
+| create report      | yes  | summarize database                 |
+| version comparison | yes  | compare current db to old versions  |
+
 
 Sheet 2 contains the database information and source files. **Here, the "User input" column is to be modified**
 
-| **Variable**          | **User input**          | **Comment**                               | **Options** |
-|:----------------------|:------------------------|:------------------------------------------|:------------|
-| project name          | **Invertebrate_example_database** | Name of the database                  | string      |
-| taxa list             | **/PATH/invertebrates.xlsx** | Excel file containing taxa to download    | PATH        |
-| identifier whitelist  | **/PATH/identifier_white_list.xlsx** | Enter path to identifier whitelist | PATH        |
-| location whitelist    | **/PATH/country_white_list.xlsx** | Enter path to location whitelist   | PATH        |
-| output folder         | **/PATH/example**           | Enter path to output directory             | PATH        |
-| marker                | **COI-5P**                   | Marker to download                         | string      |
-| rating minimum        | **5**                       | Keep only sequences that are >= X          | yes / no    |
-| download overwrite    | **yes**                     | Overwrite existing files?                  | yes / no    |
-| alignment overwrite   | **yes**                     | Overwrite existing files?                  | yes / no    |
-| tree overwrite        | **yes**                     | Overwrite existing files?                  | yes / no    |
-| mafft executable      | **/PATH/mafft**             | Either "mafft" or "PATH/TO/mafft"           | PATH        |
-| iqtree executable     | **/PATH/iqtree2**           | Either "iqtree" or "PATH/TO/iqtree"         | PATH        |
-| mptp executable       | **/PATH/mptp**              | Either "mptp" or "PATH/TO/mptp"             | PATH        |
-| makeblastdb executable | **/PATH/makeblastdb**      | Either "makeblastdb" or "PATH/TO/makeblastdb" | PATH        |
-| MIDORI2 fasta         |                          | Enter path to MDORI2 file                  | PATH        |
-| outgroup_fasta        | **/PATH/outgroup.fasta**    | Enter path to outgroup sequence             | PATH        |
+| Category                      | Rating | Comment                                                              |
+|-------------------------------|--------|----------------------------------------------------------------------|
+| monophyletic OR               | 15     | Evaluation of species delimitation results                             |
+| monophyletic (singleton)       | 5      |                                                                      |
+| Reverse BIN taxonomy          | -10    | Automated assignment based on similarity to other barcodes             |
+| good sequence quality         | 6      | Sequence contains AGCT only                                            |
+| bad sequence quality          | -10    | Sequence contains more than 2% not AGCT                                |
+| longer than or equal to 500 bp | 5      | Recommended barcode length is >= 500 bp                                |
+| identifier on whitelist       | 10     | Specimens identified by experts are preferred                           |
+| main country OR               | 9      | Either country or coordinates are evaluated                            |
+| neighbour country OR          | 6      |                                                                      |
+| continent                     | 3      |                                                                      |
+| distance <= d1 OR             | 9      |                                                                      |
+| distance <= d2 OR             | 6      |                                                                      |
+| distance <= d3                | 3      |                                                                      |
+| province                      | 1      | Available metadata                                                   |
+| region                        | 1      | Available metadata                                                   |
+| exactsite                     | 1      | Available metadata                                                   |
+| lifestage                     | 1      | Available metadata                                                   |
+| sex                           | 1      | Available metadata                                                   |
+| Ambiguous identification      | -20    | No species-level identification: set rating to -20                    |
 
 ## Run SeqRanker
 First, prepare the settings file according to your needs. Then, the SeqRanker pipeline can easily be initiated via the following command(s):
 
-#### pypi version
+#### Run the pipeline
 * Open a new terminal
 * Execute: `seqranker ./PATH/TO/FOLDER/settings.xlsx`
-
-#### standalone version
-* Doubleclick on the `seqranker_v0.1-macosx-ventura` or `seqranker_v0.1-W11` executable.
-* Provide the settings.xlsx file.
 
 ## Example data
 Example data that was used for the creation a database for European freshwater invertebrates can be found [here](https://github.com/TillMacher/dbDNA/tree/main/european_freshwater_invertebrates):
@@ -103,8 +101,7 @@ Example data that was used for the creation a database for European freshwater i
 #### Step 2: Species delineation
 * The sequences of all records of each family in the dataset are combined in a separate .fasta file.
 * A multiple sequence alignment for each family is calculated, using _mafft_.
-* A maximum likelihood tree for each family is calculated, using _IQ-Tree_ (fast option).
-* Species are delimited for each family, using _mPTP_.
+* Species are delimited for each family, using _VSEARCH_, based on a 99% similarity clustering.
 * The species delimitation results are used evaluate if a species record is mono- or paraphyletic.
 
 #### Step 3: Rating system

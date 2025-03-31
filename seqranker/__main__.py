@@ -41,7 +41,6 @@ from Bio.Align.AlignInfo import SummaryInfo
 from Bio import AlignIO
 from Bio.Align import Alignment
 from Bio.motifs import Motif
-from numba import njit, prange
 import os
 
 ####### STORE RUNTIMES #######
@@ -626,138 +625,6 @@ def run_mafft(family, mafft_executable, folder, cpu_count):
 
     print('')
 
-def read_alignment(aln_file):
-    """Reads alignment and converts to a NumPy character matrix."""
-    records = list(SeqIO.parse(aln_file, "fasta"))
-    seqs = np.array([list(str(record.seq)) for record in records], dtype="U1")
-    ids = [record.id for record in records]
-    return seqs, ids
-
-# Parallel computation of the lower triangular matrix
-def compute_row_partial(i, aln_dict, ids):
-    """Compute row i up to column i in the lower triangular matrix."""
-    seq1 = aln_dict[ids[i]]
-    row = []
-    for j in range(i + 1):
-        seq2 = aln_dict[ids[j]]
-        # Inline percent identity calculation
-        matches, valid_positions = 0, 0
-        for a, b in zip(seq1, seq2):
-            if a != '-' and b != '-':  # Ignore gaps
-                valid_positions += 1
-                if a == b:
-                    matches += 1
-        pid = matches / valid_positions if valid_positions > 0 else 0.0
-        row.append(pid)
-    return row
-
-def run_soverlap(family, folder, similarity_threshold, cpu_count):
-    """
-    Optimized function to calculate an overlap matrix for a specified family and handle sequence filtering.
-    """
-
-    # family = 'Hydropsychidae'
-
-    family_dir = Path(folder) / family
-    family_dir.mkdir(parents=True, exist_ok=True)
-
-    # File paths
-    aln_file = family_dir / f"1_{family}_alignment.fasta"
-    solverlap_file = Path(f"{family_dir}/1_{family}_soverlap.parquet")
-    fasta_file_derep = family_dir / f"1_{family}_derep.fasta"
-    fasta_file_filtered = family_dir / f"1_{family}_derep_filtered.fasta"
-
-    if not aln_file.is_file():
-        print(f"{datetime.now().strftime('%H:%M:%S')} - No alignment file found for {family}.\n")
-        return False
-
-    # Load sequences
-    print(f"{datetime.now().strftime('%H:%M:%S')} - Reading alignment file for {family}...")
-    seqs, ids = read_alignment(aln_file)
-    n = len(seqs)
-
-    if os.path.isfile(solverlap_file):
-        print(f"{datetime.now().strftime('%H:%M:%S')} - Overlap matrix for {family} already exists ({n} sequences).")
-        # Load overlap matrix from a Parquet file
-        overlap_df = pd.read_parquet(solverlap_file, engine='pyarrow')
-        soverlap_matrix, ids = overlap_df.values, overlap_df.index.tolist()
-    else:
-        print(f"{datetime.now().strftime('%H:%M:%S')} - Calculating overlap matrix for {family} ({n} sequences).")
-        # Compute similarity matrix
-        # Use tqdm for progress tracking
-        results = Parallel(n_jobs=cpu_count)(delayed(compute_row_partial)(i, aln_dict, ids) for i in tqdm(range(n),desc=f'{datetime.now().strftime("%H:%M:%S")} - Processing sequences'))
-
-        # Construct the full symmetric matrix
-        print(f"{datetime.now().strftime('%H:%M:%S')} - Constructing overlap matrix.")
-        soverlap_matrix = np.zeros((n, n), dtype=np.float32)
-        for i, row in tqdm(enumerate(results)):
-            soverlap_matrix[i, :i + 1] = row
-            soverlap_matrix[:i + 1, i] = row
-
-        # Save results
-        print(f"{datetime.now().strftime('%H:%M:%S')} - Storing overlap matrix as Parquet.")
-        overlap_df = pd.DataFrame(soverlap_matrix, index=ids, columns=ids)
-        overlap_df.to_parquet(solverlap_file, engine='pyarrow', compression='snappy')
-        print(f"{datetime.now().strftime('%H:%M:%S')} - Overlap matrix saved as Parquet.")
-
-    # Identify sequences to remove
-    print(f"{datetime.now().strftime('%H:%M:%S')} - Calculating row means.")
-    row_means = soverlap_matrix.mean(axis=1)
-    remove_ids = {ids[i] for i, mean in enumerate(row_means) if mean < similarity_threshold}
-
-    if not remove_ids:
-        print(f"{datetime.now().strftime('%H:%M:%S')} - No spurious sequences found for {family}.\n")
-        return False
-    else:
-        print(f"{datetime.now().strftime('%H:%M:%S')} - Removing {len(remove_ids)} low-similarity sequences.\n")
-        with open(fasta_file_derep, "r") as input_handle, open(fasta_file_filtered, "w") as output_handle:
-            for record in SeqIO.parse(input_handle, "fasta"):
-                if record.id not in remove_ids:
-                    SeqIO.write(record, output_handle, "fasta")
-        return True
-
-def rerun_mafft(family, mafft_executable, folder, cpu_count, rerun):
-    """
-    Function to rerun MAFFT alignment for a given family.
-    """
-    print(f'{datetime.now().strftime("%H:%M:%S")} - Starting MAFFT rerun alignment for {family}.')
-
-    # Subdirectories for output and temporary files
-    family_dir = Path(f'{folder}/{family}')
-    if not os.path.exists(family_dir):
-        os.makedirs(family_dir)
-
-    # File paths
-    fasta_file_filtered = Path(f'{family_dir}/1_{family}_derep_filtered.fasta')
-    aln_file = Path(f'{family_dir}/1_{family}_alignment.fasta')
-    aln_file_adjusted = Path(f'{family_dir}/1_{family}_alignment_adjusted.fasta')
-
-    if rerun and os.path.isfile(aln_file) and os.path.isfile(fasta_file_filtered):
-        # Filter the FASTA file
-        print(f'{datetime.now().strftime("%H:%M:%S")} - Re-calculating alignment for {family}.')
-        # Run MAFFT
-        command = f"{mafft_executable} --auto --quiet --thread {cpu_count} --preservecase {fasta_file_filtered} > {aln_file}"
-        process = subprocess.Popen(command, shell=True)
-        process.wait()
-
-        # Prepare the alignment
-        print(f'{datetime.now().strftime("%H:%M:%S")} - Preparing alignment for VSEARCH.')
-        convert_aln_file(aln_file, aln_file_adjusted)
-        print(f'{datetime.now().strftime("%H:%M:%S")} - Finished MAFFT rerun alignment for {family}.')
-        print('')
-
-    elif not rerun and os.path.isfile(aln_file):
-        print(f'{datetime.now().strftime("%H:%M:%S")} - Alignment looks fine for {family}.')
-        # Prepare the alignment
-        print(f'{datetime.now().strftime("%H:%M:%S")} - Preparing alignment for VSEARCH.')
-        convert_aln_file(aln_file, aln_file_adjusted)
-        print(f'{datetime.now().strftime("%H:%M:%S")} - Finished MAFFT rerun alignment for {family}.')
-        print('')
-
-    else:
-        print(f'{datetime.now().strftime("%H:%M:%S")} - No alignment file found for {family}.')
-        print('')
-
 ## run species delimitation
 def run_vsearch(family, vsearch_executable, folder, cpu_count):
     """
@@ -792,7 +659,7 @@ def run_vsearch(family, vsearch_executable, folder, cpu_count):
         print('')
         return
 
-    if not os.path.isfile(aln_file) or not os.path.isfile(aln_file_adjusted):
+    if not os.path.isfile(aln_file) and not os.path.isfile(aln_file_adjusted):
         print(f'{datetime.now().strftime("%H:%M:%S")} - {family} is missing an alignment file. Cannot calculate clusters!')
 
         species_data = [[record[4], record[21], '', 'Error: Vsearch could not find alignment file', '', 0] for record in raw_records]
@@ -803,6 +670,10 @@ def run_vsearch(family, vsearch_executable, folder, cpu_count):
         species_df.to_parquet(species_file_txt_snappy, index=False, compression='snappy')
         print('')
         return
+
+    print(f'{datetime.now().strftime("%H:%M:%S")} - Preparing alignment for VSEARCH.')
+    convert_aln_file(aln_file, aln_file_adjusted)
+    print(f'{datetime.now().strftime("%H:%M:%S")} - Adjusted alignment for {family}.')
 
     # Run VSEARCH for species delimitation
     print(f'{datetime.now().strftime("%H:%M:%S")} - Running VSEARCH for {family}.')
@@ -929,16 +800,6 @@ def phylogenetic_approach(output_directories, mafft_executable, vsearch_executab
     print('{} - Starting mafft alignments.'.format(datetime.now().strftime("%H:%M:%S")))
     [run_mafft(family, mafft_executable, folder, cpu_count) for family in families]
     print('{} - Finished mafft alignments.\n'.format(datetime.now().strftime("%H:%M:%S")))
-
-    # overlap analysis (NOT in parallel, can cause memory issues, because it requires LOTS of ram... may change in future versions)
-    print('{} - Starting overlap analysis.'.format(datetime.now().strftime("%H:%M:%S")))
-    rerun_families = {family: run_soverlap(family, folder, similarity_threshold, cpu_count) for family in families}
-    print('{} - Finished overlap analysis.\n'.format(datetime.now().strftime("%H:%M:%S")))
-
-    # rerun mafft if required
-    print('{} - Starting mafft alignments (round 2).'.format(datetime.now().strftime("%H:%M:%S")))
-    [rerun_mafft(family, mafft_executable, folder, cpu_count, rerun) for family, rerun in rerun_families.items()]
-    print('{} - Finished mafft alignments (round 2).\n'.format(datetime.now().strftime("%H:%M:%S")))
 
     # Vsearch clustering
     print('{} - Starting vsearch clustering.'.format(datetime.now().strftime("%H:%M:%S")))
@@ -1307,6 +1168,21 @@ def optimal_height(y_values):
         height = min_height
     return height
 
+def get_higher_taxon_from_gbif(family_name, higher_taxon):
+    # GBIF API URL for taxon search
+    url = f"https://api.gbif.org/v1/species/match?name={family_name}&rank=family"
+
+    response = requests.get(url)
+
+    if response.status_code == 200:
+        data = response.json()
+        if higher_taxon in data and higher_taxon + 'Key' in data:
+            return data[higher_taxon], data[higher_taxon + 'Key']
+        else:
+            return "f{higher_taxon} not found", None
+    else:
+        return f"Error: {response.status_code}", None
+
 def create_report(output_directories, project_name, taxa_list):
 
     print(f'\n{datetime.now().strftime("%H:%M:%S")} - Creating report for project: {project_name}.')
@@ -1339,8 +1215,8 @@ def create_report(output_directories, project_name, taxa_list):
     shared_perc = n_shared / len_0 * 100
     print(f'{datetime.now().strftime("%H:%M:%S")} - Detected reference barcodes: {shared_perc} %, {n_shared} in total.')
 
-    ## 1) taxa without barcodes
-    print(f'{datetime.now().strftime("%H:%M:%S")} - Collecting number of records per input taxon.')
+    ## 1) input taxa without barcodes
+    print(f'{datetime.now().strftime("%H:%M:%S")} - Collecting number of records per input input taxon.')
     taxa_list_df = pd.read_excel(taxa_list)
     all_levels = reference_db_df[['order_name', 'class_name', 'family_name', 'genus_name', 'species_name']].values.tolist()
     flattened_levels = list([item for sublist in all_levels for item in sublist if item != ''])
@@ -1348,7 +1224,7 @@ def create_report(output_directories, project_name, taxa_list):
     for taxon in taxa_list_df.values.tolist():
         taxon = taxon[0]
         res[taxon] = flattened_levels.count(taxon)
-    barcodes_df = pd.DataFrame([[i,j] for i,j in res.items()], columns=['Taxon', 'Barcodes'])
+    barcodes_df = pd.DataFrame([[i,j] for i,j in res.items()], columns=['Taxon', 'Barcodes']).sort_values('Barcodes')
     barcodes_df.to_excel(Path('{}/{}.report_barcodes.xlsx'.format(output_directories[4], project_name)), index=False)
 
     check_df = barcodes_df.copy()
@@ -1460,6 +1336,120 @@ def create_report(output_directories, project_name, taxa_list):
     file_5 = Path('{}/{}.report_5.pdf'.format(output_directories[4], project_name))
     fig.write_image(file_5)
 
+    ## 6) Calculate barcode coverage
+
+    print(f'{datetime.now().strftime("%H:%M:%S")} - Assessing barcode coverage.')
+    reference_xlsx = Path(reference_xlsx)
+    if not reference_xlsx.exists():
+        print(f'{datetime.now().strftime("%H:%M:%S")} - Could not find a reference list!')
+    else:
+        reference_df = pd.read_excel(reference_xlsx).fillna('')
+        reference_species = []
+        higher_taxon = reference_taxon
+
+        if 'Species' in reference_df.columns.tolist():
+            dropped_species = []
+            for h_taxon, species in reference_df[[higher_taxon, 'Species']].values.tolist():
+                if species != '' and all(char.isalpha() or char.isspace() for char in species):
+                    name = f"{species.split(' ')[0]} {species.split(' ')[1]}"
+                    reference_species.append([h_taxon.title(), name])
+                else:
+                    dropped_species.append(species)
+
+            ref_taxa = pd.DataFrame(reference_species, columns=[higher_taxon, 'species_name'])
+            db_species = sorted(reference_db_df['species_name'].drop_duplicates().values.tolist())
+            db_genera = sorted(set([i.split(' ')[0] for i in db_species]))
+
+            # print dropped species
+            rel_dropped = round(len(dropped_species) / (len(dropped_species) + len(reference_species)) * 100, 2)
+            print(f'{datetime.now().strftime("%H:%M:%S")} - Dropped {len(dropped_species)} ({rel_dropped}%) taxa that did not meet species recognition criteria!')
+
+            barcode_coverage_dict = {}
+            barcode_coverage_list = []
+            for h_taxon in sorted(ref_taxa[higher_taxon].drop_duplicates().values.tolist(), reverse=True):
+                h_taxon_species = ref_taxa[ref_taxa[higher_taxon] == h_taxon]['species_name'].drop_duplicates().values.tolist()
+                species_present = []
+                genus_present = []
+                missing = []
+                for species in h_taxon_species:
+                    genus = species.split(' ')[0]
+                    if species in db_species:
+                        species_present.append(species)
+                        res = [h_taxon, species, 'species present']
+                    elif genus in db_genera:
+                        genus_present.append(species)
+                        res = [h_taxon, species, 'genus present']
+                    else:
+                        missing.append(species)
+                        res = [h_taxon, species, 'species absent']
+                    barcode_coverage_list.append(res)
+                total = len(species_present) + len(genus_present) + len(missing)
+                barcode_coverage_dict[h_taxon] = [len(species_present)/total, len(genus_present)/total, len(missing)/total, total]
+
+            # Barcode Coverage
+            fig = go.Figure()
+            species_present = [i[0] for i in barcode_coverage_dict.values()]
+            genus_present = [i[1] for i in barcode_coverage_dict.values()]
+            total = [i[3] for i in barcode_coverage_dict.values()]
+            families = [i for i in barcode_coverage_dict.keys()]
+            fig.add_trace(go.Bar(x=species_present, y=families, name='species present', marker_color='Green', orientation='h'))
+            fig.add_trace(go.Bar(x=genus_present, y=families, name='genus present', marker_color='Lightgreen', orientation='h'))
+            # Add annotations for total counts
+            for fam, count, species in zip(families, total, species_present):
+                fig.add_annotation(
+                    x=1.05,  # Position the text at the middle of the species bar
+                    y=fam,
+                    text=str(count),  # Convert total count to string
+                    showarrow=False,  # No arrow, just text
+                    font=dict(size=12, color='black'),
+                    xanchor="center",  # Align text in the middle
+                    yanchor="middle"
+                )
+            fig.update_layout(template='simple_white',
+                              width=1000,
+                              height= optimal_height(families),
+                              barmode='stack',
+                              title=f'Barcode coverage: "{higher_taxon}"'
+                              )
+            fig.update_xaxes(title='Barcode coverage (species)', dtick=0.1)
+            fig.update_yaxes(dtick='linear', automargin=True)
+            file_6 = Path('{}/{}.report_6.pdf'.format(output_directories[4], project_name))
+            fig.write_image(file_6)
+
+            # also write the table
+            barcode_coverage_df = pd.DataFrame(barcode_coverage_list, columns=[higher_taxon, 'Species', 'Status'])
+            barcode_coverage_xlsx = Path('{}/{}.barcode_coverage.xlsx'.format(output_directories[4], project_name))
+            barcode_coverage_df.to_excel(barcode_coverage_xlsx, index=False)
+
+        else:
+            print(f'{datetime.now().strftime("%H:%M:%S")} - Could not find "{higher_taxon}" in the reference list!')
+
+        ## 7) rating per taxonomic level
+        print(f'{datetime.now().strftime("%H:%M:%S")} - Assessing rating per taxonomic level.')
+        levels = ['phylum_name', 'class_name', 'order_name', 'family_name']
+        i = 1
+        for level in tqdm(levels):
+            fig = go.Figure()
+            taxa = sorted(reference_db_df[level].drop_duplicates().values.tolist(), reverse=True)
+            res = {taxon:reference_db_df[reference_db_df[level]==taxon]['rating'].values.tolist() for taxon in taxa}
+            for taxon in taxa:
+                fig.add_trace(go.Box(x=res[taxon], y=[taxon]*len(res[taxon]), line_width=1, marker_size=1, marker_color='Navy', orientation='h'))
+                fig.add_annotation(text=f'Ø{str(round(np.mean(res[taxon]), 2))}', x=51, y=taxon, xanchor="left", showarrow=False, font=dict(size=8, color='black'))
+            fig.update_layout(template='simple_white',
+                              width=1000,
+                              height= optimal_height(taxa),
+                              title=f'Rating distribution: "{level}"',
+                              showlegend=False
+                              )
+            fig.update_xaxes(title=f'Rating distribution', range=(-21,51), dtick=10)
+            fig.update_yaxes(dtick='linear')
+            fig.add_vrect(x0=9.5, x1=24.5, line_width=0, fillcolor="Peru", opacity=0.3, layer='below')
+            fig.add_vrect(x0=24.5, x1=39.5, line_width=0, fillcolor="Silver", opacity=0.3, layer='below')
+            fig.add_vrect(x0=39.5, x1=50.5, line_width=0, fillcolor="Gold", opacity=0.3, layer='below')
+            file = Path('{}/{}.report_{}_7.pdf'.format(output_directories[4], project_name, i))
+            fig.write_image(file)
+            i += 1
+
     ## merge pdf files
     print(f'{datetime.now().strftime("%H:%M:%S")} - Creating report file.')
     mergeFile = PyPDF2.PdfMerger()
@@ -1473,6 +1463,13 @@ def create_report(output_directories, project_name, taxa_list):
     os.remove(file_4)
     mergeFile.append(PyPDF2.PdfReader(file_5, 'rb'))
     os.remove(file_5)
+    if file_6.is_file():
+        mergeFile.append(PyPDF2.PdfReader(file_6, 'rb'))
+        os.remove(file_6)
+    file_7 = glob.glob(str(Path('{}/{}*_7.pdf'.format(output_directories[4], project_name))))
+    for file in file_7:
+        mergeFile.append(PyPDF2.PdfReader(file, 'rb'))
+        os.remove(file)
     merged_report = Path('{}/{}.report.pdf'.format(output_directories[4], project_name))
     mergeFile.write(merged_report)
 
@@ -1640,139 +1637,144 @@ def filter_BTL_taxa():
 
 ########################################################################################################################
 
-# settings_xlsx = '/Volumes/Coruscant/dbDNA/settings/settings_mzb_mac.xlsx'
+def main():
 
-## load settings file
-## collect user input from command line
-if len(sys.argv) > 1:
-    settings_xlsx = Path(sys.argv[1])
+    # settings_xlsx = '/Volumes/Coruscant/dbDNA/settings/settings_mzb_mac.xlsx'
 
-## otherwise set to default location
-else:
-    settings_xlsx = Path('./settings.xlsx')
+    ## load settings file
+    ## collect user input from command line
+    if len(sys.argv) > 1:
+        settings_xlsx = Path(sys.argv[1])
 
-## check if settings file is existing
-if not os.path.isfile(settings_xlsx):
-    user_input = input("Please provide the (full) PATH to a settings file:\n")
-    settings_xlsx = Path(user_input)
+    ## otherwise set to default location
+    else:
+        settings_xlsx = Path('./settings.xlsx')
 
-## check if settings file is existing
-if not os.path.isfile(settings_xlsx):
-    print('Could not find the settings.xlsx!\n')
-    print(settings_xlsx)
+    ## check if settings file is existing
+    if not os.path.isfile(settings_xlsx):
+        user_input = input("Please provide the (full) PATH to a settings file:\n")
+        settings_xlsx = Path(user_input)
 
-## run main script
-else:
-    # Collect tasks to run from settings file
-    tasks = pd.read_excel(settings_xlsx, sheet_name='Tasks')
-    data_source = tasks.loc[tasks['Task'] == 'source']['Run'].values.tolist()[0]
-    run_download = tasks.loc[tasks['Task'] == 'download']['Run'].values.tolist()[0]
-    run_extraction = tasks.loc[tasks['Task'] == 'extract']['Run'].values.tolist()[0]
-    run_blacklist = tasks.loc[tasks['Task'] == 'blacklist']['Run'].values.tolist()[0]
-    run_phylogeny = tasks.loc[tasks['Task'] == 'phylogeny']['Run'].values.tolist()[0]
-    run_rating = tasks.loc[tasks['Task'] == 'rating']['Run'].values.tolist()[0]
-    run_create_database = tasks.loc[tasks['Task'] == 'create database']['Run'].values.tolist()[0]
-    run_create_report = tasks.loc[tasks['Task'] == 'create report']['Run'].values.tolist()[0]
+    ## check if settings file is existing
+    if not os.path.isfile(settings_xlsx):
+        print('Could not find the settings.xlsx!\n')
+        print(settings_xlsx)
 
-    # Collect variables from settings file
-    variables = pd.read_excel(settings_xlsx, sheet_name='Variables')
-    project_name_or = variables.loc[variables['Variable'] == 'project name']['User input'].values.tolist()[0]
-    version = variables.loc[variables['Variable'] == 'version']['User input'].values.tolist()[0]
-    project_name = project_name_or + f'_v{version}'
-    taxa_list = variables.loc[variables['Variable'] == 'taxa list']['User input'].values.tolist()[0]
-    identifier_whitelist = variables.loc[variables['Variable'] == 'identifier whitelist']['User input'].values.tolist()[0]
-    location_whitelist = variables.loc[variables['Variable'] == 'location whitelist']['User input'].values.tolist()[0]
-    record_blacklist = variables.loc[variables['Variable'] == 'record blacklist']['User input'].values.tolist()[0]
-    output_folder = variables.loc[variables['Variable'] == 'output folder']['User input'].values.tolist()[0]
-    marker = variables.loc[variables['Variable'] == 'marker']['User input'].values.tolist()[0]
-    mafft_executable = variables.loc[variables['Variable'] == 'mafft executable']['User input'].values.tolist()[0]
-    similarity_threshold = variables.loc[variables['Variable'] == 'similarity threshold']['User input'].values.tolist()[0]
-    vsearch_executable = variables.loc[variables['Variable'] == 'vsearch executable']['User input'].values.tolist()[0]
-    makeblastdb_exe = variables.loc[variables['Variable'] == 'makeblastdb executable']['User input'].values.tolist()[0]
-    midori2_fasta = variables.loc[variables['Variable'] == 'MIDORI2 fasta']['User input'].values.tolist()[0]
-    lat_db = variables.loc[variables['Variable'] == 'lat']['User input'].values.tolist()[0]
-    lon_db = variables.loc[variables['Variable'] == 'lon']['User input'].values.tolist()[0]
-    d1 = variables.loc[variables['Variable'] == 'distance1']['User input'].values.tolist()[0]
-    d2 = variables.loc[variables['Variable'] == 'distance2']['User input'].values.tolist()[0]
-    d3 = variables.loc[variables['Variable'] == 'distance3']['User input'].values.tolist()[0]
-    use_coordinates = variables.loc[variables['Variable'] == 'coordinates']['User input'].values.tolist()[0]
-    use_country = variables.loc[variables['Variable'] == 'country']['User input'].values.tolist()[0]
-    cpu_count = variables.loc[variables['Variable'] == 'cpu count']['User input'].values.tolist()[0]
+    ## run main script
+    else:
+        # Collect tasks to run from settings file
+        tasks = pd.read_excel(settings_xlsx, sheet_name='Tasks')
+        data_source = tasks.loc[tasks['Task'] == 'source']['Run'].values.tolist()[0]
+        run_download = tasks.loc[tasks['Task'] == 'download']['Run'].values.tolist()[0]
+        run_extraction = tasks.loc[tasks['Task'] == 'extract']['Run'].values.tolist()[0]
+        run_blacklist = tasks.loc[tasks['Task'] == 'blacklist']['Run'].values.tolist()[0]
+        run_phylogeny = tasks.loc[tasks['Task'] == 'phylogeny']['Run'].values.tolist()[0]
+        run_rating = tasks.loc[tasks['Task'] == 'rating']['Run'].values.tolist()[0]
+        run_create_database = tasks.loc[tasks['Task'] == 'create database']['Run'].values.tolist()[0]
+        run_create_report = tasks.loc[tasks['Task'] == 'create report']['Run'].values.tolist()[0]
 
-    ########################################################################################################################
+        # Collect variables from settings file
+        variables = pd.read_excel(settings_xlsx, sheet_name='Variables')
+        project_name_or = variables.loc[variables['Variable'] == 'project name']['User input'].values.tolist()[0]
+        version = variables.loc[variables['Variable'] == 'version']['User input'].values.tolist()[0]
+        project_name = project_name_or + f'_v{version}'
+        taxa_list = variables.loc[variables['Variable'] == 'taxa list']['User input'].values.tolist()[0]
+        identifier_whitelist = variables.loc[variables['Variable'] == 'identifier whitelist']['User input'].values.tolist()[0]
+        location_whitelist = variables.loc[variables['Variable'] == 'location whitelist']['User input'].values.tolist()[0]
+        record_blacklist = variables.loc[variables['Variable'] == 'record blacklist']['User input'].values.tolist()[0]
+        output_folder = variables.loc[variables['Variable'] == 'output folder']['User input'].values.tolist()[0]
+        marker = variables.loc[variables['Variable'] == 'marker']['User input'].values.tolist()[0]
+        mafft_executable = variables.loc[variables['Variable'] == 'mafft executable']['User input'].values.tolist()[0]
+        similarity_threshold = variables.loc[variables['Variable'] == 'similarity threshold']['User input'].values.tolist()[0]
+        vsearch_executable = variables.loc[variables['Variable'] == 'vsearch executable']['User input'].values.tolist()[0]
+        makeblastdb_exe = variables.loc[variables['Variable'] == 'makeblastdb executable']['User input'].values.tolist()[0]
+        midori2_fasta = variables.loc[variables['Variable'] == 'MIDORI2 fasta']['User input'].values.tolist()[0]
+        lat_db = variables.loc[variables['Variable'] == 'lat']['User input'].values.tolist()[0]
+        lon_db = variables.loc[variables['Variable'] == 'lon']['User input'].values.tolist()[0]
+        d1 = variables.loc[variables['Variable'] == 'distance1']['User input'].values.tolist()[0]
+        d2 = variables.loc[variables['Variable'] == 'distance2']['User input'].values.tolist()[0]
+        d3 = variables.loc[variables['Variable'] == 'distance3']['User input'].values.tolist()[0]
+        use_coordinates = variables.loc[variables['Variable'] == 'coordinates']['User input'].values.tolist()[0]
+        use_country = variables.loc[variables['Variable'] == 'country']['User input'].values.tolist()[0]
+        cpu_count = variables.loc[variables['Variable'] == 'cpu count']['User input'].values.tolist()[0]
+        reference_xlsx = variables.loc[variables['Variable'] == 'reference_xlsx']['User input'].values.tolist()[0]
+        reference_taxon = variables.loc[variables['Variable'] == 'reference_taxon']['User input'].values.tolist()[0]
 
-    ## create output folders
-    output_directories = create_new_project(project_name, output_folder)
+        ########################################################################################################################
 
-    ## open the log file in append mode
-    log_file = Path(f"{output_folder}/{project_name}.log")
-    log_file = open(log_file, "a")
+        ## create output folders
+        output_directories = create_new_project(project_name, output_folder)
 
-    ## create a custom stream that duplicates output to both console and log file
-    class TeeStream:
-        def __init__(self, *streams):
-            self.streams = streams
+        ## open the log file in append mode
+        log_file = Path(f"{output_folder}/{project_name}.log")
+        log_file = open(log_file, "a")
 
-        def write(self, data):
-            for stream in self.streams:
-                stream.write(data)
+        ## create a custom stream that duplicates output to both console and log file
+        class TeeStream:
+            def __init__(self, *streams):
+                self.streams = streams
 
-        def flush(self):
-            for stream in self.streams:
-                stream.flush()
+            def write(self, data):
+                for stream in self.streams:
+                    stream.write(data)
 
-    ## redirect stdout to both console and the log file
-    sys.stdout = TeeStream(sys.stdout, log_file)
+            def flush(self):
+                for stream in self.streams:
+                    stream.flush()
 
-    ## test if enough cores are available
-    available_cores = multiprocessing.cpu_count()
-    if type(cpu_count) != int or cpu_count == 0:
-        cpu_count = multiprocessing.cpu_count() - 1
-        print(f'{datetime.now().strftime("%H:%M:%S")} - Automatically detecing CPUs: Found {available_cores} (-1).')
-    elif cpu_count > available_cores:
-        cpu_count = multiprocessing.cpu_count() - 1
-        print('{} - Not enough CPUs available. Defaulting to {} CPUs instead.'.format(datetime.now().strftime("%H:%M:%S"), cpu_count))
-    ## print CPU usage
-    print('{} - Multithreading mode: Using up to {} CPUs per individual command.'.format( datetime.now().strftime("%H:%M:%S"), cpu_count))
-    numba.set_num_threads(cpu_count) # already limit the CPU count for numba/njit
+        ## redirect stdout to both console and the log file
+        sys.stdout = TeeStream(sys.stdout, log_file)
 
-    ## run scripts
-    if run_download == 'yes':
-        # BOLD systems workflow
-        if data_source == 'BOLD':
-            download_data_from_bold(taxa_list, output_directories, marker)
+        ## test if enough cores are available
+        available_cores = multiprocessing.cpu_count()
+        if type(cpu_count) != int or cpu_count == 0:
+            cpu_count = multiprocessing.cpu_count() - 1
+            print(f'{datetime.now().strftime("%H:%M:%S")} - Automatically detecing CPUs: Found {available_cores} (-1).')
+        elif cpu_count > available_cores:
+            cpu_count = multiprocessing.cpu_count() - 1
+            print('{} - Not enough CPUs available. Defaulting to {} CPUs instead.'.format(datetime.now().strftime("%H:%M:%S"), cpu_count))
+        ## print CPU usage
+        print('{} - Multithreading mode: Using up to {} CPUs per individual command.'.format( datetime.now().strftime("%H:%M:%S"), cpu_count))
 
-        # GenBank workflow
-        elif data_source == 'NCBI':
-            extract_MIDORI2_file(midori2_fasta, output_directories, taxa_list)
+        ## run scripts
+        if run_download == 'yes':
+            # BOLD systems workflow
+            if data_source == 'BOLD':
+                download_data_from_bold(taxa_list, output_directories, marker)
 
-    if run_extraction == 'yes':
-        # BOLD systems workflow
-        if data_source == 'BOLD':
-            extract_bold_json(output_directories, marker)
+            # GenBank workflow
+            elif data_source == 'NCBI':
+                extract_MIDORI2_file(midori2_fasta, output_directories, taxa_list)
 
-        # GenBank workflow
-        elif data_source == 'NCBI':
-            extract_genbank_files(output_directories)
+        if run_extraction == 'yes':
+            # BOLD systems workflow
+            if data_source == 'BOLD':
+                extract_bold_json(output_directories, marker)
 
-    if run_blacklist == 'Yes':
-        blacklist_filter(output_directories, record_blacklist)
+            # GenBank workflow
+            elif data_source == 'NCBI':
+                extract_genbank_files(output_directories)
 
-    if run_phylogeny == 'yes':
-        phylogenetic_approach(output_directories, mafft_executable, vsearch_executable, similarity_threshold, cpu_count)
+        if run_blacklist == 'Yes':
+            blacklist_filter(output_directories, record_blacklist)
 
-    if run_rating == 'yes':
-        rating_system(output_directories, identifier_whitelist, location_whitelist, project_name, cpu_count)
+        if run_phylogeny == 'yes':
+            phylogenetic_approach(output_directories, mafft_executable, vsearch_executable, similarity_threshold, cpu_count)
 
-    if run_create_database == 'yes':
-        create_database(output_directories, project_name, makeblastdb_exe)
+        if run_rating == 'yes':
+            rating_system(output_directories, identifier_whitelist, location_whitelist, project_name, cpu_count)
 
-    if run_create_report == 'yes':
-        create_report(output_directories, project_name, taxa_list)
+        if run_create_database == 'yes':
+            create_database(output_directories, project_name, makeblastdb_exe)
 
-    ## close the log file
-    print('{} - Writing to log file...'.format(datetime.now().strftime("%H:%M:%S")))
+        if run_create_report == 'yes':
+            create_report(output_directories, project_name, taxa_list)
 
-    ## finish script
-    print('\n{} - Done. Have a nice day!\n'.format(datetime.now().strftime("%H:%M:%S")))
+        ## close the log file
+        print('{} - Writing to log file...'.format(datetime.now().strftime("%H:%M:%S")))
 
+        ## finish script
+        print('\n{} - Done. Have a nice day!\n'.format(datetime.now().strftime("%H:%M:%S")))
+
+if __name__ == "__main__":
+    main()

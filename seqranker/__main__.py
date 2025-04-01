@@ -216,264 +216,220 @@ def extract_bold_json(output_directories, marker):
 
 ## NCBI
 
-def get_desired_ranks(taxid, desired_ranks):
-    ncbi = NCBITaxa()
-    lineage = ncbi.get_lineage(taxid)
-    lineage2ranks = ncbi.get_rank(lineage)
-    ranks2lineage = dict((rank, taxid) for (taxid, rank) in lineage2ranks.items())
-    return {'{}_id'.format(rank): ranks2lineage.get(rank, '<not present>') for rank in desired_ranks}
+def download_data_from_genbank(taxa_list, output_directories, marker):
+    # Set email (NCBI requires this)
+    Entrez.email = "your_email@example.com"
 
-def ncbi_taxid_request(taxid):
+    print('{} - Starting data download from genbank.'.format(datetime.now().strftime("%H:%M:%S")))
 
-    desired_ranks = ['phylum', 'class', 'order', 'family', 'genus', 'species']
-    taxonomy_list = []
-    try:
-        results = get_desired_ranks(taxid, desired_ranks)
-        taxids = [str(taxid) for taxid in list(results.values())]
+    taxa_list_df = pd.read_excel(taxa_list).fillna('')
+    dir_out = output_directories[1]
+    taxa = sorted(set([i[0] for i in taxa_list_df.values.tolist() if i[0] != '']))
 
-        # if the taxonomy is not present
-        # DO THIS
-        if '<not present>' in taxids:
-            for taxid in taxids:
-                if taxid != '<not present>':
-                    url = 'https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi?db=taxonomy&id=' + str(taxid)
-                    response = requests.get(url)
-                    data = xmltodict.parse(response.content)
-                    for entry in data['eSummaryResult']['DocSum']['Item']:
-                        if entry['@Name'] == 'ScientificName':
-                            name = entry['#text']
-                            taxonomy_list.append(name)
-                    time.sleep(0.2)
-                else:
-                    taxonomy_list.append('')
+    for taxon in tqdm(taxa ,desc='Download', leave=True):
+        # Define search query
+        markers_prompt = ' OR '.join([f"{i.strip()}[All Fields]" for i in marker.split(',')])
+        query = f'{taxon}[Organism] AND ({markers_prompt} OR "complete genome"[Title])'
 
-        # if all taxonomy information is present
-        # DO THIS
+        # define output file
+        output = Path(f'{dir_out}/{taxon}.gb')
+
+        if Path(f'{output}.gz').is_file():
+            tqdm.write(f'{datetime.now().strftime("%H:%M:%S")} - File already exists: {taxon}')
         else:
-            url = 'https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi?db=taxonomy&id=' + ','.join(taxids)
-            response = requests.get(url)
-            data = xmltodict.parse(response.content)
-            for entry in data['eSummaryResult']['DocSum']:
-                for item in entry['Item']:
-                    if item['@Name'] == 'ScientificName':
-                        name = item['#text']
-                        taxonomy_list.append(name)
-        return taxonomy_list
-    except ValueError:
-        return ['No Match'] * 6
 
-def accession2taxid(accession):
-    url = 'https://www.ncbi.nlm.nih.gov/nuccore/{}'.format(accession)
-    as_session = HTMLSession()
-    as_session.headers.update({'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/98.9.4758.82 Safari/537.36'})
-    retry_strategy = Retry(total = 10, status_forcelist = [400, 401, 403, 404, 429, 500, 502, 503, 504], backoff_factor = 1)
-    adapter = HTTPAdapter(max_retries = retry_strategy)
-    as_session.mount('https://', adapter)
-    as_session.mount('http://', adapter)
-    r = as_session.get(url, timeout = 300)
-    data = r.text.split(';')
-    taxid = [i for i in data if '?ORGANISM' in i][0].split('?')[-1].replace('&amp', '').replace('ORGANISM=', '')
+            # Perform the search
+            handle = Entrez.esearch(db="nucleotide", term=query, retmax=8000)  # Increase retmax if needed
+            record = Entrez.read(handle)
+            handle.close()
 
-    return taxid
+            # Get list of sequence IDs
+            id_list = record["IdList"]
 
-def extract_MIDORI2_file(midori2_fasta, output_directories, taxa_list):
-
-    print('{} - Starting data download from GenBank.\n'.format(datetime.now().strftime("%H:%M:%S")))
-
-    download_folder = output_directories[1]
-    taxa_list_all = pd.read_excel(taxa_list)['Taxon'].values.tolist()
-
-    n_sequences = 0
-    for record in SeqIO.parse(midori2_fasta, "fasta"):
-        n_sequences += 1
-
-    count = 0
-    with open(midori2_fasta) as handle:
-        for record in SeqIO.parse(handle, "fasta"):
-            count += 1
-            header = record.id
-            accession = header.split(';')[0].split('.')[0]
-
-            # Write the data to a .gb file
-            gb_file = f"{download_folder}/{accession}.gb"
-
-            if os.path.isfile(gb_file):
-                print('{} - {} already exists ({}/{}).'.format(datetime.now().strftime("%H:%M:%S"), accession, count, n_sequences))
-
-            elif any(species in header for species in taxa_list_all):
-
-                # Always tell NCBI who you are
-                Entrez.email = "till-hendrik.macher@uni-due.de"
-
-                # Use Entrez.efetch to get the genbank record for the accession number
-                handle = Entrez.efetch(db="nucleotide", id=accession, rettype="gb", retmode="text")
-
-                # Read the data returned
-                data = handle.read()
-
-                # write gb file
-                with open(gb_file, "w") as f:
-                    f.write(data)
-
-                # Close the handle
+            if id_list:
+                # Fetch sequences in GenBank format
+                handle = Entrez.efetch(db="nucleotide", id=",".join(id_list), rettype="gb", retmode="text")
+                sequences = handle.read()
                 handle.close()
 
-                # allow for maximum 3 requests per second
-                time.sleep(1/3)
+                # Save to file
+                with open(output, "w") as f:
+                    f.write(sequences)
 
-                print('{} - Finished {} ({}/{}).'.format(datetime.now().strftime("%H:%M:%S"), accession, count, n_sequences))
+                if output.is_file():
+                    with open(output, 'rb') as f_in:
+                        with gzip.open(f'{output}.gz', 'wb') as f_out:
+                            shutil.copyfileobj(f_in, f_out)
+                    os.remove(output)
 
-    print('{} - Finished data download from GenBank.\n'.format(datetime.now().strftime("%H:%M:%S")))
+                tqdm.write(f'{datetime.now().strftime("%H:%M:%S")} - Finished download for: {taxon}')
+            else:
+                tqdm.write(f'{datetime.now().strftime("%H:%M:%S")} - No sequences found for {taxon}.')
 
-def extract_taxid(file):
-    for record in SeqIO.parse(file, "genbank"):
-        for feature in record.features:
-            if feature.type == "source":
-                taxid = feature.qualifiers.get("db_xref")
-                if taxid:
-                    for id in taxid:
-                        if "taxon" in id:
-                            return id.split(":")[1]
+def ncbi_taxid_request(taxid):
+    desired_ranks = ['kingdom', 'phylum', 'class', 'order', 'family', 'genus', 'species']
+    try:
+        ncbi = NCBITaxa()
+        lineage = ncbi.get_lineage(taxid)
+        lineage2ranks = ncbi.get_rank(lineage)
+        ranks2lineage = dict((rank, taxid) for (taxid, rank) in lineage2ranks.items())
+        results = {'{}_id'.format(rank): ranks2lineage.get(rank, '<not present>') for rank in desired_ranks}
+        taxids = [str(taxid) for taxid in list(results.values())]
+        taxonomy = [list(ncbi.get_taxid_translator([taxid]).values())[0] for taxid in taxids]
+        return taxonomy
+    except ValueError:
+        taxonomy_placeholder = f'Unknown taxid {str(taxid)}'
+        return [taxonomy_placeholder] * 7
 
-def extract_genbank_files(output_directories):
+def extract_genbank_files(output_directories, marker):
 
     print('{} - Starting to collect data from .gb files.\n'.format(datetime.now().strftime("%H:%M:%S")))
 
-    taxids_xlsx = '/Volumes/Coruscant/dbDNA/taxids.xlsx'
-    taxids_df = pd.read_excel(taxids_xlsx).fillna('No Match').drop_duplicates()
-    taxids_dict = {i[0]:i[1:] for i in taxids_df.values.tolist()}
+    files = glob.glob(f'{output_directories[1]}/*.gb.gz')
 
-    files = glob.glob(f'{output_directories[1]}/*.gb')
-
-    columns = ['processid', 'sampleid', 'recordID', 'catalognum', 'fieldnum', 'institution_storing', 'collection_code',
-               'bin_uri', 'phylum_taxID', 'phylum_name', 'class_taxID', 'class_name', 'order_taxID', 'order_name', 'family_taxID',
-               'family_name', 'subfamily_taxID', 'subfamily_name', 'genus_taxID', 'genus_name', 'species_taxID', 'species_name',
-               'subspecies_taxID', 'subspecies_name', 'identification_provided_by', 'identification_method', 'identification_reference',
-               'tax_note', 'voucher_status', 'tissue_type', 'collection_event_id', 'collectors', 'collectiondate_start',
-               'collectiondate_end', 'collectiontime', 'collection_note', 'site_code', 'sampling_protocol', 'lifestage',
-               'sex', 'reproduction', 'habitat', 'associated_specimens', 'associated_taxa', 'extrainfo', 'notes', 'lat',
-               'lon', 'coord_source', 'coord_accuracy', 'elev', 'depth', 'elev_accuracy', 'depth_accuracy', 'country', 'province_state',
-               'region', 'sector', 'exactsite', 'image_ids', 'image_urls', 'media_descriptors', 'captions', 'copyright_holders',
-               'copyright_years', 'copyright_licenses', 'copyright_institutions', 'photographers', 'sequenceID', 'markercode',
-               'genbank_accession', 'nucleotides', 'trace_ids', 'trace_names', 'trace_links', 'run_dates', 'sequencing_centers',
-               'directions', 'seq_primers', 'marker_codes']
+    columns = [
+        'processid', 'sampleid', 'fieldid', 'museumid', 'record_id', 'specimenid',
+        'processid_minted_date', 'bin_uri', 'bin_created_date', 'collection_code',
+        'inst', 'sovereign_inst', 'taxid', 'kingdom', 'phylum', 'class', 'order',
+        'family', 'subfamily', 'tribe', 'genus', 'species', 'subspecies',
+        'species_reference', 'identification', 'identification_method',
+        'identification_rank', 'identified_by', 'identifier_email', 'taxonomy_notes',
+        'sex', 'reproduction', 'life_stage', 'short_note', 'notes', 'voucher_type',
+        'tissue_type', 'specimen_linkout', 'associated_specimens', 'associated_taxa',
+        'collectors', 'collection_date_start', 'collection_date_end',
+        'collection_event_id', 'collection_time', 'collection_notes', 'geoid',
+        'country/ocean', 'country_iso', 'province/state', 'region', 'sector', 'site',
+        'site_code', 'coord', 'coord_accuracy', 'coord_source', 'elev', 'elev_accuracy',
+        'depth', 'depth_accuracy', 'realm', 'biome', 'ecoregion', 'habitat',
+        'sampling_protocol', 'nuc', 'nuc_basecount', 'insdc_acs', 'funding_src',
+        'marker_code', 'primers_forward', 'primers_reverse', 'sequence_run_site',
+        'sequence_upload_date', 'bold_recordset_code_arr', 'geopol_denorm.country_iso3',
+        'marker_count', 'pre_md5hash', 'specimendetails.verbatim_identification_method',
+        'specimendetails.verbatim_depository', 'specimendetails.verbatim_sampling_protocol',
+        'specimendetails.verbatim_subspecies', 'location.verbatim_coord',
+        'collection_date_accuracy', 'specimendetails.verbatim_collectiondate',
+        'specimendetails.verbatim_collectiondate_start', 'location.verbatim_elev',
+        'location.verbatim_gps_accuracy', 'location.verbatim_gps_source',
+        'specimendetails.verbatim_identifier', 'specimendetails.verbatim_tissuetype',
+        'specimendetails.verbatim_vouchertype', 'location.verbatim_depth',
+        'specimendetails.verbatim_habitat'
+    ]
 
     all_references_list = []
-    accession_taxid_taxonomy_list = []
     n_files = len(files)
 
-    for i, file in enumerate(files):
+    for i, file_gz in enumerate(files):
 
-        name = Path(file).stem
+        name = Path(Path(file_gz).stem).stem
 
-        reference_dict = {i: '' for i in columns}
+        reference_dict = {col: '' for col in columns}
 
-        # open the gb file using SeqIO to scrape the basic information about each record
-        for record in SeqIO.parse(file, "genbank"):
-            reference_dict['nucleotides'] = str(record.seq)
-            accession = record.id
+        # Open the gb file using SeqIO
+        with gzip.open(file_gz, "rt") as file:
+            for record in SeqIO.parse(file, "genbank"):
+                # Check if the sequence is defined (not None and not an empty sequence)
+                try:
+                    reference_dict['nuc'] = str(record.seq)
 
-            for feature in record.features:
-                if feature.type == "source":
-                    taxid = feature.qualifiers.get("db_xref")
-                    if taxid:
-                        for id in taxid:
-                            if "taxon" in id:
-                                taxid = int(id.split(":")[1])
+                    accession = record.id
+                    reference_dict['record_id'] = accession
+                    reference_dict['sampleid'] = accession
+                    reference_dict['processid'] = accession
+                    reference_dict['inst'] = 'Mined from GenBank, NCBI'
+                    reference_dict['marker_code'] = marker
 
-            if taxid in taxids_dict.keys():
-                taxonomy = taxids_dict[taxid]
-                accession_taxid_taxonomy_list.append([accession] + taxonomy)
-            else:
-                # convert taxid to taxonomy
-                taxonomy = ncbi_taxid_request(taxid)
-                accession_taxid_taxonomy_list.append([accession] + taxonomy)
-                taxids_dict[taxid] = taxonomy
+                    # Extract taxonomic information
+                    taxid = None
+                    for feature in record.features:
+                        if feature.type == "source":
+                            taxid_info = feature.qualifiers.get("db_xref", [])
+                            for id in taxid_info:
+                                if "taxon" in id:
+                                    taxid = int(id.split(":")[1])
 
-        ## add data to dataframe
-        reference_dict['phylum_name'] = taxonomy[0]
-        reference_dict['class_name'] = taxonomy[1]
-        reference_dict['order_name'] = taxonomy[2]
-        reference_dict['family_name'] = taxonomy[3]
-        reference_dict['genus_name'] = taxonomy[4]
-        reference_dict['species_name'] = taxonomy[5]
-        reference_dict['processid'] = f"Midori2-{i}"
-        sampleid = Path(file).stem
-        reference_dict['genbank_accession'] = sampleid
-        reference_dict['sampleid'] = sampleid
-        reference_dict['sequenceID'] = sampleid
-        reference_dict['institution_storing'] = 'Mined from GenBank, NCBI'
-        reference_dict['markercode'] = 'srRNA'
+                    taxonomy = ncbi_taxid_request(taxid) if taxid else ["Unknown"] * 7
+                    reference_dict.update({
+                        'phylum': taxonomy[1],
+                        'class': taxonomy[2],
+                        'order': taxonomy[3],
+                        'family': taxonomy[4],
+                        'genus': taxonomy[5],
+                        'species': taxonomy[6],
+                    })
 
-        # open the file again to scrape the remaining information
-        # this is easier done line by line due to the missing information in many gb files
-        with open(file, 'r') as f:
-            for line in f:
-                # country
-                if 'country' in line:
-                    try:
-                        res = line.lstrip().rstrip('\n').replace('"', '').split('=')[1]
-                        country = res.split(':')[0]
-                        region = res.split(':')[1]
-                        reference_dict['country'] = country
-                        reference_dict['region'] = region
-                    except:
-                        reference_dict['country'] = line.lstrip().rstrip('\n').replace('"', '').replace("/country=", "")
+                    # Extract metadata from features
+                    for feature in record.features:
+                        if feature.type == "source":
+                            # Country and region
+                            if "country" in feature.qualifiers:
+                                country_data = feature.qualifiers["country"][0].split(":")
+                                reference_dict["country/ocean"] = country_data[0].strip()
+                                reference_dict["province/state"] = country_data[1].strip() if len(country_data) > 1 else "Unknown"
 
-                if 'AUTHORS' in line:
-                    reference_dict['collectors'] = line.lstrip().rstrip('\n').replace('"', '').replace("AUTHORS", "").lstrip()
+                            # Latitude and longitude
 
-                # identifier
-                if 'identified' in line:
-                    reference_dict['identification_provided_by'] = line.lstrip().rstrip('\n').replace("/identified_by=", "").replace('\"', '')
+                            if "lat_lon" in feature.qualifiers:
+                                lat_lon = feature.qualifiers["lat_lon"][0]
+                                coords = re.findall(r"[-+]?\d*\.\d+|\d+",
+                                                    lat_lon)  # Extracts only numbers (including decimals)
 
-                # lat lon
-                if '/lat_lon' in line:
-                    reference_dict['lat'] = line.lstrip().rstrip('\n').replace('/lat_lon=', '').replace('\"', '')
+                                if len(coords) >= 2:  # Ensuring there are at least two values
+                                    reference_dict["coord"] = f"[{coords[0]}, {coords[1]}]"
+                                else:
+                                    reference_dict["coord"] = ''
+
+                    # Extract collectors/authors
+                    if "references" in record.annotations:
+                        references = record.annotations["references"]
+                        if references:
+                            reference_dict["collectors"] = references[0].authors if hasattr(references[0], "authors") else "Unknown"
+
+                    # Extract identification provider
+                    if "identified_by" in record.annotations:
+                        reference_dict["identified_by"] = record.annotations["identified_by"]
+
+                    # Append extracted data
+                    all_references_list.append(list(reference_dict.values()))
+                except:
+                    print(f'  Skipped {record.id} due to errors in the .gb file!')
 
         print('{} - Finished {} ({}/{}).'.format(datetime.now().strftime("%H:%M:%S"), name, i+1, n_files))
 
-        ## add reference sequences to list
-        all_references_list.append(list(reference_dict.values()))
-
-    ## create a dataframe
+    # Create a dataframe
     df_filtered = pd.DataFrame(all_references_list, columns=columns)
-    ## split and save a separate table for each family (will reduce runtimes significantly
+
+    # Save tables by family for efficiency
     split_raw_barcode_table(output_directories, df_filtered)
 
-    # update taxids file
-    taxids_dict_2 = pd.DataFrame([[key] + values for key,values in taxids_dict.items()], columns=taxids_df.columns)
-    taxids_dict_2.to_excel(taxids_xlsx, index=False)
-
     print('{} - Checkpoint: {}'.format(datetime.now().strftime("%H:%M:%S"), time_diff(t0)))
-    print('{} - Finished to collect data from .gb files.\n'.format(datetime.now().strftime("%H:%M:%S")))
+    print('{} - Finished collecting data from .gb files.\n'.format(datetime.now().strftime("%H:%M:%S")))
 
-####### RECORD BLACK LIST #######
-def blacklist_filter(output_directories, record_blacklist):
+####### RECORD BLOCK LIST #######
+def blocklist_filter(output_directories, record_blocklist):
 
-    print(f'{datetime.now().strftime("%H:%M:%S")} - Removing records based on blacklist.')
+    print(f'{datetime.now().strftime("%H:%M:%S")} - Removing records based on blocklist.')
 
     ## verify file
-    if not os.path.isfile(record_blacklist):
-        print(f'{datetime.now().strftime("%H:%M:%S")} - Could not find the provided blacklist file!')
+    if not os.path.isfile(record_blocklist):
+        print(f'{datetime.now().strftime("%H:%M:%S")} - Could not find the provided blocklist file!')
         return
 
-    ## read blacklist
-    blacklist_df = pd.read_excel(record_blacklist).fillna('')
-    families = set(blacklist_df['family_name'].values.tolist())
-    print(f'{datetime.now().strftime("%H:%M:%S")} - Found {len(blacklist_df)} records from {len(families)} families to remove.')
+    ## read blocklist
+    blocklist_df = pd.read_excel(record_blocklist).fillna('')
+    families = set(blocklist_df['family_name'].values.tolist())
+    print(f'{datetime.now().strftime("%H:%M:%S")} - Found {len(blocklist_df)} records from {len(families)} families to remove.')
 
     ## exclude records per family
     for family in families:
         family_table = Path(output_directories[2].joinpath(family, f'2_{family}_raw_barcodes.parquet.snappy'))
-        records_to_remove = blacklist_df.loc[blacklist_df['family_name'] == family]['record_id'].values.tolist()
+        records_to_remove = blocklist_df.loc[blocklist_df['family_name'] == family]['record_id'].values.tolist()
         if os.path.isfile(family_table):
             df = pd.read_parquet(family_table).fillna('')
             df_filtered = df[~df['record_id'].isin(records_to_remove)]
             df_filtered.to_parquet(family_table, compression='snappy')
             print(f'{datetime.now().strftime("%H:%M:%S")} - Removed {len(df) - len(df_filtered)} record(s) from {family}.')
 
-    print(f'{datetime.now().strftime("%H:%M:%S")} - Finished removing records based on blacklist.\n')
+    print(f'{datetime.now().strftime("%H:%M:%S")} - Finished removing records based on blocklist.\n')
 
 ####### PHYLOGENY #######
 
@@ -826,7 +782,7 @@ def haversine(lat1, lon1, lat2, lon2):
 ####### RATING #######
 
 # function to rate each family
-def rate_family(output_directories, identifier_whitelist_lst, location_whitelist_lst, family, use_coordinates, use_country, d1, d2, d3):
+def rate_family(output_directories, identifier_permitlist_lst, location_permitlist_lst, family, use_coordinates, use_country, d1, d2, d3):
 
     # family = 'Arthropleidae'
     # check_coordinates = True
@@ -856,9 +812,9 @@ def rate_family(output_directories, identifier_whitelist_lst, location_whitelist
     all_ratings_list = []
 
     # Location white list
-    main_country = [i for i in location_whitelist_lst['main country'].values.tolist() if i != '']
-    neighbour_countries = [i for i in location_whitelist_lst['neighbour_countries'].values.tolist() if i != '']
-    continent = [i for i in location_whitelist_lst['continent'].values.tolist() if i != '']
+    main_country = [i for i in location_permitlist_lst['main country'].values.tolist() if i != '']
+    neighbour_countries = [i for i in location_permitlist_lst['neighbour_countries'].values.tolist() if i != '']
+    continent = [i for i in location_permitlist_lst['continent'].values.tolist() if i != '']
 
     ## read result files
     df2 = pd.read_parquet(species_file_txt_snappy).fillna('')
@@ -954,7 +910,7 @@ def rate_family(output_directories, identifier_whitelist_lst, location_whitelist
             rating_calc.append('-10 (rev. BIN identification)')
 
         ## Identification white list
-        if identification_by in identifier_whitelist_lst:
+        if identification_by in identifier_permitlist_lst:
             rating += 10
             rating_calc.append('+10 (identifier on whiteilist)')
 
@@ -1049,7 +1005,7 @@ def rate_family(output_directories, identifier_whitelist_lst, location_whitelist
     print('{} - Finished rating for {}.'.format(datetime.now().strftime("%H:%M:%S"), family))
 
 # main script for rating algorithm
-def rating_system(output_directories, identifier_whitelist, location_whitelist, project_name, cpu_count):
+def rating_system(output_directories, identifier_permitlist, location_permitlist, project_name, cpu_count, lat_db, lon_db, d1, d2, d3, use_coordinates, use_country):
 
     print('{} - Collecting raw records.'.format(datetime.now().strftime("%H:%M:%S")))
 
@@ -1057,8 +1013,8 @@ def rating_system(output_directories, identifier_whitelist, location_whitelist, 
     files = glob.glob('{}/*/*_raw_barcodes.parquet.snappy'.format(output_directories[2]))
     families = sorted([Path(i).name.replace('_raw_barcodes.parquet.snappy', '').replace('2_', '') for i in files])
 
-    identifier_whitelist_lst = sorted(set(pd.read_excel(identifier_whitelist, sheet_name='Identifier_Whitelist').fillna('')['Name (as used on BOLD)'].values.tolist()))
-    location_whitelist_lst = pd.read_excel(location_whitelist).fillna('')
+    identifier_permitlist_lst = sorted(set(pd.read_excel(identifier_permitlist, sheet_name='Identifier_permitlist').fillna('')['Name (as used on BOLD)'].values.tolist()))
+    location_permitlist_lst = pd.read_excel(location_permitlist).fillna('')
 
     ## for testing
     # files_to_delete = glob.glob('/Volumes/Coruscant/dbDNA/FEI_genera_BarCodeBank/2_phylogeny/*/*.ratings.parquet.snappy')
@@ -1067,7 +1023,7 @@ def rating_system(output_directories, identifier_whitelist, location_whitelist, 
     print('{} - Starting to rate sequences.'.format(datetime.now().strftime("%H:%M:%S")))
 
     ## rate all families in parallel
-    Parallel(n_jobs=cpu_count, backend='threading')(delayed(rate_family)(output_directories, identifier_whitelist_lst, location_whitelist_lst, family, use_coordinates, use_country, d1, d2, d3) for family in families)
+    Parallel(n_jobs=cpu_count, backend='threading')(delayed(rate_family)(output_directories, identifier_permitlist_lst, location_permitlist_lst, family, use_coordinates, use_country, d1, d2, d3) for family in families)
 
     print('{} - Finished rating for all families.'.format(datetime.now().strftime("%H:%M:%S")))
 
@@ -1183,7 +1139,7 @@ def get_higher_taxon_from_gbif(family_name, higher_taxon):
     else:
         return f"Error: {response.status_code}", None
 
-def create_report(output_directories, project_name, taxa_list):
+def create_report(output_directories, project_name, taxa_list, reference_xlsx, reference_taxon):
 
     print(f'\n{datetime.now().strftime("%H:%M:%S")} - Creating report for project: {project_name}.')
 
@@ -1639,7 +1595,7 @@ def filter_BTL_taxa():
 
 def main():
 
-    # settings_xlsx = '/Volumes/Coruscant/dbDNA/settings/settings_mzb_mac.xlsx'
+    # settings_xlsx = '/Volumes/Coruscant/dbDNA/settings/settings_fish_12S_mac.xlsx'
 
     ## load settings file
     ## collect user input from command line
@@ -1667,7 +1623,7 @@ def main():
         data_source = tasks.loc[tasks['Task'] == 'source']['Run'].values.tolist()[0]
         run_download = tasks.loc[tasks['Task'] == 'download']['Run'].values.tolist()[0]
         run_extraction = tasks.loc[tasks['Task'] == 'extract']['Run'].values.tolist()[0]
-        run_blacklist = tasks.loc[tasks['Task'] == 'blacklist']['Run'].values.tolist()[0]
+        run_blocklist = tasks.loc[tasks['Task'] == 'blocklist']['Run'].values.tolist()[0]
         run_phylogeny = tasks.loc[tasks['Task'] == 'phylogeny']['Run'].values.tolist()[0]
         run_rating = tasks.loc[tasks['Task'] == 'rating']['Run'].values.tolist()[0]
         run_create_database = tasks.loc[tasks['Task'] == 'create database']['Run'].values.tolist()[0]
@@ -1679,9 +1635,9 @@ def main():
         version = variables.loc[variables['Variable'] == 'version']['User input'].values.tolist()[0]
         project_name = project_name_or + f'_v{version}'
         taxa_list = variables.loc[variables['Variable'] == 'taxa list']['User input'].values.tolist()[0]
-        identifier_whitelist = variables.loc[variables['Variable'] == 'identifier whitelist']['User input'].values.tolist()[0]
-        location_whitelist = variables.loc[variables['Variable'] == 'location whitelist']['User input'].values.tolist()[0]
-        record_blacklist = variables.loc[variables['Variable'] == 'record blacklist']['User input'].values.tolist()[0]
+        identifier_permitlist = variables.loc[variables['Variable'] == 'identifier permitlist']['User input'].values.tolist()[0]
+        location_permitlist = variables.loc[variables['Variable'] == 'location permitlist']['User input'].values.tolist()[0]
+        record_blocklist = variables.loc[variables['Variable'] == 'record blocklist']['User input'].values.tolist()[0]
         output_folder = variables.loc[variables['Variable'] == 'output folder']['User input'].values.tolist()[0]
         marker = variables.loc[variables['Variable'] == 'marker']['User input'].values.tolist()[0]
         mafft_executable = variables.loc[variables['Variable'] == 'mafft executable']['User input'].values.tolist()[0]
@@ -1744,7 +1700,7 @@ def main():
 
             # GenBank workflow
             elif data_source == 'NCBI':
-                extract_MIDORI2_file(midori2_fasta, output_directories, taxa_list)
+                download_data_from_genbank(taxa_list, output_directories, taxa_list)
 
         if run_extraction == 'yes':
             # BOLD systems workflow
@@ -1753,22 +1709,22 @@ def main():
 
             # GenBank workflow
             elif data_source == 'NCBI':
-                extract_genbank_files(output_directories)
+                extract_genbank_files(output_directories, marker)
 
-        if run_blacklist == 'Yes':
-            blacklist_filter(output_directories, record_blacklist)
+        if run_blocklist == 'Yes':
+            blocklist_filter(output_directories, record_blocklist)
 
         if run_phylogeny == 'yes':
             phylogenetic_approach(output_directories, mafft_executable, vsearch_executable, similarity_threshold, cpu_count)
 
         if run_rating == 'yes':
-            rating_system(output_directories, identifier_whitelist, location_whitelist, project_name, cpu_count)
+            rating_system(output_directories, identifier_permitlist, location_permitlist, project_name, cpu_count, lat_db, lon_db, d1, d2, d3, use_coordinates, use_country)
 
         if run_create_database == 'yes':
             create_database(output_directories, project_name, makeblastdb_exe)
 
         if run_create_report == 'yes':
-            create_report(output_directories, project_name, taxa_list)
+            create_report(output_directories, project_name, taxa_list, reference_xlsx, reference_taxon)
 
         ## close the log file
         print('{} - Writing to log file...'.format(datetime.now().strftime("%H:%M:%S")))

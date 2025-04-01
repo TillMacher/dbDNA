@@ -5,7 +5,7 @@ with open("README.md", "r", encoding="utf-8") as fh:
 
 setuptools.setup(
     name="seqranker",
-    version="0.1.3",
+    version="0.1.4",
     author="Till-Hendrik Macher",
     author_email="macher@uni-trier.de",
     description="dbDNA - A phylogeny- and expert identifier-driven grading system for reliable taxonomic annotation of (meta)barcoding data",
@@ -32,7 +32,7 @@ setuptools.setup(
         'openpyxl>=3.1.5',
         'pyarrow>=19.0.1',
         'fastparquet>=2024.11.0',
-        'kaleido>=0.2.1'
+        'kaleido>=0.2.1',
     ],
     include_package_data=True,
     classifiers=[
